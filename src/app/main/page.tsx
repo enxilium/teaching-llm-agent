@@ -1,26 +1,29 @@
 'use client'
 
+import TypewriterText from "@/components/TypewriterText";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-import Scratchboard from "@/components/Scratchboard";
 
+// Update Message interface
 interface Message {
   id: number;
   sender: "user" | "ai";
   text: string;
+  isTyping?: boolean;
 }
 
 export default function Home() {
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [questionInput, setQuestionInput] = useState("");
-  const [isScratchboardOpen, setScratchboardOpen] = useState(false);
   const [scratchboardContent, setScratchboardContent] = useState("");
   const [usedQuestionIndices, setUsedQuestionIndices] = useState<number[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number | null>(null);
   const [isQuestioningEnabled, setIsQuestioningEnabled] = useState(true);
   const [timeLeft, setTimeLeft] = useState(120); // 2 minutes
   const [nextMessageId, setNextMessageId] = useState(3); // IDs 1 and 2 are used initially
+  const [typingMessageIds, setTypingMessageIds] = useState<number[]>([]);
 
   const timerInitializedRef = useRef(false);
   const roundEndedRef = useRef(false);
@@ -29,6 +32,15 @@ export default function Home() {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   };
 
   // Function to load a new round: clears chat, fetches a new problem, resets timer and state.
@@ -103,35 +115,39 @@ export default function Home() {
     return () => clearInterval(countdownInterval);
   }, []);
 
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Update handleQuestion to include scrolling
   const handleQuestion = async () => {
     if (!questionInput.trim() || !isQuestioningEnabled) return;
 
-    setNextMessageId(prevId => {
-      const newId = prevId;
-      setMessages(prev => [
-        ...prev,
-        {
-          id: newId,
-          sender: "user",
-          text: questionInput.trim()
-        }
-      ]);
-      return newId + 1;
-    });
-    setQuestionInput("");
+    const userMessageId = nextMessageId;
+    const aiMessageId = nextMessageId + 1;
+    setNextMessageId(prev => prev + 2);
 
-    setNextMessageId(prevId => {
-      const newId = prevId;
-      setMessages(prev => [
-        ...prev,
-        {
-          id: newId,
-          sender: "ai",
-          text: "Here's my help with your question... [AI response logic here]"
-        }
-      ]);
-      return newId + 1;
-    });
+    setMessages(prev => [
+      ...prev,
+      {
+        id: userMessageId,
+        sender: "user",
+        text: questionInput.trim()
+      }
+    ]);
+    setQuestionInput("");
+    scrollToBottom();
+
+    // Add AI response with typing effect
+    setTypingMessageIds(prev => [...prev, aiMessageId]);
+    setMessages(prev => [
+      ...prev,
+      {
+        id: aiMessageId,
+        sender: "ai",
+        text: "Here's my help with your question... [AI response logic here]"
+      }
+    ]);
   };
 
   const handleSend = async () => {
@@ -141,32 +157,30 @@ export default function Home() {
       return;
     }
 
-    setNextMessageId(prevId => {
-      const newId = prevId;
-      setMessages(prev => [
-        ...prev,
-        {
-          id: newId,
-          sender: "user",
-          text: `Final Answer: ${input.trim()}`
-        }
-      ]);
-      return newId + 1;
-    });
-    setInput("");
+    const userMessageId = nextMessageId;
+    const aiMessageId = nextMessageId + 1;
+    setNextMessageId(prev => prev + 2);
 
-    setNextMessageId(prevId => {
-      const newId = prevId;
-      setMessages(prev => [
-        ...prev,
-        {
-          id: newId,
-          sender: "ai",
-          text: `Thank you for your answer! Here's my feedback: [Evaluation logic here]`
-        }
-      ]);
-      return newId + 1;
-    });
+    setMessages(prev => [
+      ...prev,
+      {
+        id: userMessageId,
+        sender: "user",
+        text: `Final Answer: ${input.trim()}\n\nReasoning: ${scratchboardContent}`
+      }
+    ]);
+    setInput("");
+    scrollToBottom();
+
+    setTypingMessageIds(prev => [...prev, aiMessageId]);
+    setMessages(prev => [
+      ...prev,
+      {
+        id: aiMessageId,
+        sender: "ai",
+        text: "Thank you for your answer! Here's my feedback: [Evaluation logic here]"
+      }
+    ]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -196,7 +210,7 @@ export default function Home() {
         </div>
 
         {/* Blackboard Section */}
-        <div className="flex-1 flex items-center justify-center py-8 relative">
+        <div className="flex-1 flex items-center justify-center pb-8 relative">
           <div className="bg-secondary border-[#210651] border-[1em] w-full h-full rounded-xl mx-16 relative">
             {/* Timer */}
             <div className={`absolute top-4 right-4 px-4 py-2 rounded-full ${timeLeft <= 30 ? 'bg-red-500' : 'bg-blue-500'} text-white font-mono text-xl z-10 flex items-center gap-2`}>
@@ -208,39 +222,52 @@ export default function Home() {
 
             {/* Chat Area */}
             <div className="absolute inset-0 p-8 mt-16 mb-24 mx-8 flex flex-col">
-              <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+              <div
+                ref={chatContainerRef}
+                className="flex-1 overflow-y-auto space-y-4 mb-4"
+              >
                 {messages.map((msg) => (
-                  <div key={msg.id} className={`flex ${msg.sender === "ai" ? "flex-row" : "flex-row-reverse"} items-start`}>
+                  <div key={`msg-${msg.id}`} className={`flex ${msg.sender === "ai" ? "flex-row" : "flex-row-reverse"} items-start`}>
                     {msg.sender === "ai" && (
                       <Image
                         src={"bob_avatar.svg"}
                         alt="AI Avatar"
-                        width={75}
-                        height={75}
+                        width={40}
+                        height={40}
                         className="rounded-full mr-2"
                       />
                     )}
-                    <div className={`max-w-[70%] p-3 rounded-lg ${msg.sender === "ai" ? "bg-gray-200 text-gray-800" : "bg-blue-500 text-white"}`}>
-                      {msg.text}
+                    <div className={`max-w-[70%] p-3 rounded-lg ${msg.sender === "ai" ? "bg-gray-200 text-gray-800" : "bg-blue-500 text-white"
+                      }`}>
+                      {msg.sender === "ai" && typingMessageIds.includes(msg.id) ? (
+                        <TypewriterText
+                          text={msg.text}
+                          speed={30}
+                          onCharacterTyped={scrollToBottom}
+                          onComplete={() => {
+                            setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
+                            scrollToBottom();
+                          }}
+                        />
+                      ) : (
+                        <div className="whitespace-pre-wrap">{msg.text}</div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
-
-              
             </div>
-          </div>
 
           {/* Decorations */}
           <Image
             src={"Bob.svg"}
             alt="Blackboard"
-            width={200}
-            height={200}
-            className="absolute z-10 -top-10 left-0"
+            width={175}
+            height={175}
+            className="absolute z-10 -top-10 -left-20"
           />
 
-          <div className="bg-primary w-[95%] h-8 rounded-2xl absolute left-1/2 transform -translate-x-1/2 bottom-[5%]">
+          <div className="bg-primary w-full h-8 rounded-2xl absolute left-1/2 transform -translate-x-1/2 -bottom-5">
             <Image
               src={"flower.svg"}
               alt="Decoration"
@@ -282,47 +309,47 @@ export default function Home() {
         </div>
 
         {/* Answer Submission Section */}
-        <div className="mt-4 flex gap-4 items-center justify-center">
-          <button
-            onClick={() => setScratchboardOpen(true)}
-            className="bg-primary hover:bg-opacity-90 text-white px-6 py-3 rounded-full flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-            </svg>
-            Scratchboard
-          </button>
-          <div className="flex items-center bg-white rounded-full p-2 max-w-xs w-full">
-            <input
-              type="text"
-              name="answer"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="flex-1 outline-none px-4 text-sm"
-              placeholder={scratchboardContent ? "Submit final answer..." : "Use scratchboard first..."}
-              disabled={!scratchboardContent || !isQuestioningEnabled}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!scratchboardContent || !isQuestioningEnabled}
-              className={`px-4 py-1 rounded-full text-sm ${scratchboardContent && isQuestioningEnabled
-                ? 'bg-green-500 hover:bg-green-600 text-white cursor-pointer'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
-            >
-              Submit
-            </button>
-          </div>
-        </div>
-      </div>
+          <div className="flex flex-col gap-4 items-center justify-center w-full max-w-2xl mx-auto">
+            {/* Scratchboard Textarea */}
+            <div className="w-full">
+              <label htmlFor="scratchboard" className="block text-white text-sm mb-2">
+                Show your reasoning:
+              </label>
+              <textarea
+                id="scratchboard"
+                value={scratchboardContent}
+                onChange={(e) => setScratchboardContent(e.target.value)}
+                className="w-full h-32 bg-white bg-opacity-10 text-white rounded-lg p-3 resize-none outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Write your reasoning here before submitting your final answer..."
+              />
+            </div>
 
-      {/* Scratchboard Component */}
-      <Scratchboard
-        isOpen={isScratchboardOpen}
-        onClose={() => setScratchboardOpen(false)}
-        onContentChange={setScratchboardContent}
-      />
+            {/* Final Answer Input */}
+            <div className="flex items-center bg-white rounded-full p-2 w-full">
+              <input
+                type="text"
+                name="answer"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="flex-1 outline-none px-4 text-sm"
+                placeholder={scratchboardContent ? "Submit final answer..." : "Show your reasoning first..."}
+                disabled={!scratchboardContent || !isQuestioningEnabled}
+              />
+              <button
+                onClick={handleSend}
+                disabled={!scratchboardContent || !isQuestioningEnabled}
+                className={`px-4 py-1 rounded-full text-sm ${scratchboardContent && isQuestioningEnabled
+                    ? 'bg-green-500 hover:bg-green-600 text-white cursor-pointer'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+              >
+                Submit
+              </button>
+            </div>
+          </div>
+      </div>
+    </div>
     </div>
   );
 }
