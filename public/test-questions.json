@@ -1,0 +1,29 @@
+{
+    "questions": [
+        {
+            "id": 1,
+            "question": "If you have 8 distinct objects, in how many ways can you arrange 3 of them in a row?",
+            "correctAnswer": "336"
+        },
+        {
+            "id": 2,
+            "question": "How many different committees of 3 people can be formed from a group of 7 people?",
+            "correctAnswer": "35"
+        },
+        {
+            "id": 3,
+            "question": "How many ways can you distribute 5 distinct prizes to 8 students if each student can receive at most one prize?",
+            "correctAnswer": "6720"
+        },
+        {
+            "id": 4,
+            "question": "In how many different ways can the letters of the word 'MATHEMATICS' be arranged?",
+            "correctAnswer": "75600"
+        },
+        {
+            "id": 5,
+            "question": "How many different 4-digit numbers can be formed using the digits 1, 2, 3, 4, 5 if each digit can be used only once?",
+            "correctAnswer": "120"
+        }
+    ]
+}

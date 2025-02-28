@@ -3,14 +3,10 @@
 import TypewriterText from "@/components/TypewriterText";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-
-// Update Message interface
-interface Message {
-  id: number;
-  sender: "user" | "ai";
-  text: string;
-  isTyping?: boolean;
-}
+import { Message } from "@/utils/types";
+// Add to imports in page.tsx
+import { aiService, AI_MODELS, DEFAULT_MODEL } from '@/services/AI';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -24,6 +20,12 @@ export default function Home() {
   const [timeLeft, setTimeLeft] = useState(120); // 2 minutes
   const [nextMessageId, setNextMessageId] = useState(3); // IDs 1 and 2 are used initially
   const [typingMessageIds, setTypingMessageIds] = useState<number[]>([]);
+  const [evaluationComplete, setEvaluationComplete] = useState(false);
+  const [currentModel, setCurrentModel] = useState<string>(DEFAULT_MODEL.id);
+
+  // Add provider filter state for UI
+  const [selectedProvider, setSelectedProvider] = useState<string>('all');
+  const router = useRouter();
 
   const timerInitializedRef = useRef(false);
   const roundEndedRef = useRef(false);
@@ -53,9 +55,11 @@ export default function Home() {
       // Reset used indices if necessary
       let availableIndices = Array.from({ length: combinatoricsQuestions.length }, (_, i) => i)
         .filter(index => !usedQuestionIndices.includes(index));
+      // Check if we've used all questions
       if (availableIndices.length === 0) {
-        setUsedQuestionIndices([]);
-        availableIndices = Array.from({ length: combinatoricsQuestions.length }, (_, i) => i);
+        // All questions have been used, redirect to break screen
+        router.push('/break');
+        return; // Stop execution here
       }
 
       const randomIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
@@ -84,6 +88,9 @@ export default function Home() {
     setTimeLeft(120);
     setIsQuestioningEnabled(true);
     roundEndedRef.current = false;
+
+    setScratchboardContent("");
+    setInput("");
   };
 
   // Initial load – start new round on mount
@@ -119,7 +126,6 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  // Update handleQuestion to include scrolling
   const handleQuestion = async () => {
     if (!questionInput.trim() || !isQuestioningEnabled) return;
 
@@ -127,6 +133,7 @@ export default function Home() {
     const aiMessageId = nextMessageId + 1;
     setNextMessageId(prev => prev + 2);
 
+    // Add user message immediately
     setMessages(prev => [
       ...prev,
       {
@@ -138,16 +145,51 @@ export default function Home() {
     setQuestionInput("");
     scrollToBottom();
 
-    // Add AI response with typing effect
+    // Add placeholder for AI response with typing indicator
     setTypingMessageIds(prev => [...prev, aiMessageId]);
     setMessages(prev => [
       ...prev,
       {
         id: aiMessageId,
         sender: "ai",
-        text: "Here's my help with your question... [AI response logic here]"
+        text: "..." // Placeholder text
       }
     ]);
+
+    try {
+      const newMessage: Message = {
+        id: userMessageId,
+        sender: "user",
+        text: questionInput.trim()
+      };
+      const updatedMessages = [...messages, newMessage];
+
+      // Call AI service (works with any provider)
+      const aiResponse = await aiService.generateResponse(updatedMessages, {
+        systemPrompt: "You are a helpful teaching assistant named Bob who helps students with mathematics problems. Be encouraging and provide hints rather than full answers.",
+        model: currentModel
+      });
+
+      // Update the AI message with the response
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === aiMessageId
+            ? { ...msg, text: aiResponse }
+            : msg
+        )
+      );
+    } catch (error) {
+      console.error("Error getting AI response:", error);
+
+      // Update with error message
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === aiMessageId
+            ? { ...msg, text: "I'm sorry, I encountered an error. Please try again." }
+            : msg
+        )
+      );
+    }
   };
 
   const handleSend = async () => {
@@ -161,26 +203,85 @@ export default function Home() {
     const aiMessageId = nextMessageId + 1;
     setNextMessageId(prev => prev + 2);
 
+    const userFinalAnswer = `Final Answer: ${input.trim()}\n\nReasoning: ${scratchboardContent}`;
+
+    // Add user message immediately
     setMessages(prev => [
       ...prev,
       {
         id: userMessageId,
         sender: "user",
-        text: `Final Answer: ${input.trim()}\n\nReasoning: ${scratchboardContent}`
+        text: userFinalAnswer
       }
     ]);
     setInput("");
     scrollToBottom();
 
+    // Add placeholder for AI response with typing indicator
     setTypingMessageIds(prev => [...prev, aiMessageId]);
     setMessages(prev => [
       ...prev,
       {
         id: aiMessageId,
         sender: "ai",
-        text: "Thank you for your answer! Here's my feedback: [Evaluation logic here]"
+        text: "..." // Placeholder text
       }
     ]);
+
+    try {
+      const newMessage: Message = {
+        id: userMessageId,
+        sender: "user",
+        text: userFinalAnswer
+      };
+      const updatedMessages = [...messages, newMessage];
+
+      // Enhance the system prompt for final answer evaluation
+      const evaluationPrompt = "You are a helpful teaching assistant named Bob who helps students with mathematics problems. The student has submitted their final answer. Evaluate it thoroughly, explaining what's correct and what could be improved.";
+
+      // Call AI service (works with any provider)
+      const aiResponse = await aiService.generateResponse(updatedMessages, {
+        systemPrompt: evaluationPrompt,
+        model: currentModel
+      });
+
+      // Update the AI message with the response
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === aiMessageId
+            ? {
+              ...msg,
+              text: aiResponse,
+              // Mark evaluation as complete when typing finishes
+              onComplete: () => {
+                setEvaluationComplete(true);
+              }
+            }
+            : msg
+        )
+      );
+
+      // End the current round
+      setIsQuestioningEnabled(false);
+
+    } catch (error) {
+      console.error("Error getting AI response:", error);
+
+      // Update with error message
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === aiMessageId
+            ? { ...msg, text: "I'm sorry, I encountered an error evaluating your answer. Please try again." }
+            : msg
+        )
+      );
+    }
+  };
+
+  // Add this function to handle moving to next question
+  const handleNextQuestion = () => {
+    setEvaluationComplete(false);
+    startNewRound();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -232,14 +333,20 @@ export default function Home() {
                       <Image
                         src={"bob_avatar.svg"}
                         alt="AI Avatar"
-                        width={40}
-                        height={40}
+                        width={75}
+                        height={75}
                         className="rounded-full mr-2"
                       />
                     )}
                     <div className={`max-w-[70%] p-3 rounded-lg ${msg.sender === "ai" ? "bg-gray-200 text-gray-800" : "bg-blue-500 text-white"
                       }`}>
-                      {msg.sender === "ai" && typingMessageIds.includes(msg.id) ? (
+                      {msg.sender === "ai" && typingMessageIds.includes(msg.id) && msg.text === "..." ? (
+                        <div className="flex items-center space-x-2">
+                          <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                          <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                          <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                        </div>
+                      ) : msg.sender === "ai" && typingMessageIds.includes(msg.id) ? (
                         <TypewriterText
                           text={msg.text}
                           speed={30}
@@ -247,6 +354,7 @@ export default function Home() {
                           onComplete={() => {
                             setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
                             scrollToBottom();
+                            msg.onComplete?.();
                           }}
                         />
                       ) : (
@@ -307,6 +415,20 @@ export default function Home() {
             )}
           </div>
         </div>
+
+          {evaluationComplete && !isQuestioningEnabled && (
+            <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 z-20">
+              <button
+                onClick={handleNextQuestion}
+                className="bg-green-500 hover:bg-green-600 text-white text-lg font-bold py-3 px-6 rounded-full shadow-lg flex items-center gap-2 animate-pulse"
+              >
+                Next Question
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          )}
 
         {/* Answer Submission Section */}
           <div className="flex flex-col gap-4 items-center justify-center w-full max-w-2xl mx-auto">
