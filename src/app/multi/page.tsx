@@ -67,7 +67,7 @@ DO NOT solve the problem - just ask questions that would help the class think ab
         {
             id: 'bob',
             name: 'Bob',
-            avatar: '/bob_avatar.svg',
+            avatar: 'bob_avatar.svg',
             systemPrompt: `You are Bob, a kind math teacher who guides students through combinatorics problems.
 Your role is to present problems, provide hints, ask thoughtful questions, and evaluate solutions.
 When evaluating final answers, compare the student's approach with both AI assistants' approaches.

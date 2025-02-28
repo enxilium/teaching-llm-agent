@@ -104,7 +104,7 @@ export default function Terms() {
                                 }`}
                         >
                             <Image
-                                src="/bob_avatar.svg"
+                                src="bob_avatar.svg"
                                 alt="Bob"
                                 width={80}
                                 height={80}
@@ -134,7 +134,7 @@ export default function Terms() {
                                     className="rounded-full border-2 border-white -mr-3"
                                 />
                                 <Image
-                                    src="/bob_avatar.svg"
+                                    src="bob_avatar.svg"
                                     alt="Bob"
                                     width={60}
                                     height={60}
