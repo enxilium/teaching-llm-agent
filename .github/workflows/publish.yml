@@ -30,6 +30,8 @@ jobs:
           static_site_generator: next
 
       - name: Build with Next.js 🏗️
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -f next.config.js ]; then
             echo "⚠️ Found next.config.js - Deleting it..."
