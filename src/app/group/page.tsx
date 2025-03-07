@@ -220,7 +220,7 @@ Keep your message brief (2-3 sentences) and make it feel natural, as if you're c
     };
 
     // Second bot responds to first bot
-    const triggerSecondBotResponse = async (botId, previousMsgId, previousMsg) => {
+    const triggerSecondBotResponse = async (botId: string, previousMsgId: number, previousMsg: string) => {
         const botName = botId === 'logic' ? 'Logic Bot' : 'Pattern Bot';
         const botMessageId = getUniqueMessageId();
 
@@ -368,7 +368,7 @@ Keep your response conversational (2-3 sentences) and end with something that in
         await processResponses(respondingBots, userQuestion, userMessageId);
     };
 
-    const processResponses = async (bots, userQuestion, userMessageId) => {
+    const processResponses = async (bots: string | any[], userQuestion: string, userMessageId: number) => {
         for (let i = 0; i < bots.length; i++) {
             const botId = bots[i];
             const botName = botId === 'logic' ? 'Logic Bot' : 'Pattern Bot';
