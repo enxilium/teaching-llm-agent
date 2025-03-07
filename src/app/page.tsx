@@ -153,6 +153,59 @@ export default function Terms() {
                                 Learn with Bob and specialized AI assistants
                             </p>
                         </button>
+
+                        {/* Peer learning option (without teacher) */}
+                        <button
+                            onClick={() => router.push('/group')}
+                            disabled={!termsAccepted}
+                            className={`flex flex-col items-center p-6 rounded-xl border-2 transition-all ${termsAccepted
+                                    ? 'bg-teal-600 hover:bg-teal-700 border-white cursor-pointer'
+                                    : 'bg-gray-700 border-gray-600 cursor-not-allowed opacity-50'
+                                }`}
+                        >
+                            <div className="flex mb-4">
+                                <Image
+                                    src="logic_avatar.png"
+                                    alt="Logic Bot"
+                                    width={60}
+                                    height={60}
+                                    className="rounded-full border-2 border-white -mr-3"
+                                />
+                                <Image
+                                    src="pattern_avatar.png"
+                                    alt="Pattern Bot"
+                                    width={60}
+                                    height={60}
+                                    className="rounded-full border-2 border-white -ml-3"
+                                />
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">Peer Learning</h3>
+                            <p className="text-white text-center text-sm">
+                                Learn with AI peers without a teacher
+                            </p>
+                        </button>
+
+                        {/* Self-learning option (no help) */}
+                        <button
+                            onClick={() => router.push('/solo')}
+                            disabled={!termsAccepted}
+                            className={`flex flex-col items-center p-6 rounded-xl border-2 transition-all ${termsAccepted
+                                    ? 'bg-orange-600 hover:bg-orange-700 border-white cursor-pointer'
+                                    : 'bg-gray-700 border-gray-600 cursor-not-allowed opacity-50'
+                                }`}
+                        >
+                            <Image
+                                src="user.png"
+                                alt="Self Learning"
+                                width={80}
+                                height={80}
+                                className="rounded-full mb-4 border-2 border-white"
+                            />
+                            <h3 className="text-xl font-bold text-white mb-2">Self Learning</h3>
+                            <p className="text-white text-center text-sm">
+                                Solve problems independently
+                            </p>
+                        </button>
                     </div>
                 </div>
             </div>

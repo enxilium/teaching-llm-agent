@@ -141,7 +141,10 @@ Highlight strengths and weaknesses of all three approaches to help student under
 
     // Timer effect
     useEffect(() => {
-        if (!isQuestioningEnabled || roundEndedRef.current) return;
+        // Don't start the timer until we have a valid question
+        if (!isQuestioningEnabled || roundEndedRef.current || !currentQuestion) return;
+
+        console.log("Starting timer with question:", currentQuestion);
 
         const timer = setInterval(() => {
             setTimeLeft(prev => {
@@ -149,7 +152,7 @@ Highlight strengths and weaknesses of all three approaches to help student under
                     clearInterval(timer);
                     setIsQuestioningEnabled(false);
                     roundEndedRef.current = true;
-                    // Auto-submit the "I don't know" answer when time ends
+                    // Auto-submit with current question
                     autoSubmitTimeoutAnswer();
                     return 0;
                 }
@@ -158,7 +161,7 @@ Highlight strengths and weaknesses of all three approaches to help student under
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [isQuestioningEnabled]);
+    }, [isQuestioningEnabled, currentQuestion]); // Add currentQuestion as dependency
 
 
     const formatTime = (seconds: number) => {
@@ -800,14 +803,16 @@ Address the specific question they asked without solving the entire problem.`;
     }, [messages]);
 
     const autoSubmitTimeoutAnswer = () => {
-        // Set input and scratchboard to "I don't know"
-        setInput("I don't know");
-        setScratchboardContent("I don't know");
+        console.log("Timer ran out - auto-submitting with current problem:", currentQuestion);
+
+        // Set input to indicate timeout rather than "I don't know"
+        setInput("[TIMEOUT] No answer submitted");
+        setScratchboardContent("[TIMEOUT] The student ran out of time before submitting an answer.");
 
         // Use setTimeout to ensure state updates first
         setTimeout(() => {
-            // Then call handleSend to process the submission with auto flag and current question
-            handleSend(true);
+            // Pass the current question explicitly to handleSend
+            handleSend(true, currentQuestion);
         }, 100);
     };
 
@@ -930,7 +935,12 @@ If they ask a direct question, provide a helpful hint or ask a follow-up questio
 
     // Handle submitting final answer
 
-    const handleSend = async (isAutoSubmit = false) => {
+    const handleSend = async (isAutoSubmit = false, problemText = null) => {
+        // Ensure we have the problem text - critical when timer runs out
+        const problem = problemText || currentQuestion;
+
+        console.log(`Handling ${isAutoSubmit ? 'auto' : 'user'} submission for problem:`, problem);
+
         // If this is a normal user submission, check inputs
         if (!isAutoSubmit) {
             if (!input.trim() || !isQuestioningEnabled) return;
@@ -1005,24 +1015,25 @@ Make sure to include a final numerical answer and explain any patterns or shortc
 
             // Get solutions from both bots in parallel
             const [logicBotResponse, patternBotResponse] = await Promise.all([
+                // For Logic Bot
                 aiService.generateResponse(
-                    // Use a simple, well-formed context with user message
                     [{
                         id: 100,
                         sender: "user",
-                        text: `Here's the math problem: ${currentQuestion}. Please provide your solution.`
+                        text: `Here's the math problem: ${problem}. Please provide your solution.`
                     }],
                     {
                         systemPrompt: logicBotPrompt,
                         model: currentModel
                     }
                 ),
+
+                // For Pattern Bot
                 aiService.generateResponse(
-                    // Use a simple, well-formed context with user message
                     [{
                         id: 101,
                         sender: "user",
-                        text: `Here's the math problem: ${currentQuestion}. Please provide your solution.`
+                        text: `Here's the math problem: ${problem}. Please provide your solution.`
                     }],
                     {
                         systemPrompt: patternBotPrompt,
@@ -1057,7 +1068,7 @@ Make sure to include a final numerical answer and explain any patterns or shortc
                     {
                         id: 102,
                         sender: "user",
-                        text: `Problem: ${currentQuestion}`
+                        text: `Problem: ${problem}`
                     },
                     {
                         id: userMessageId,
