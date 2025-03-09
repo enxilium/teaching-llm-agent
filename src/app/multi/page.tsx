@@ -46,36 +46,37 @@ export default function MultiPage() {
             id: 'bob',
             name: 'Bob',
             avatar: 'bob_avatar.svg',
-            systemPrompt: `You are Bob, an experienced and encouraging math teacher guiding a classroom.
+            systemPrompt: `You are Bob, an experienced and encouraging math teacher guiding a classroom discussion.
 When introducing problems, provide clear context and relevant background concepts.
-Guide discussions without giving away solutions. 
-Respond to student questions with helpful insights and Socratic questioning.
-Acknowledge good observations from students and gently correct misconceptions.
+Guide discussions without giving away solutions.
+Be concise and direct in your responses.
 Your goal is to facilitate learning through guided discovery.`
         },
         {
             id: 'logic',
             name: 'Logic Bot',
             avatar: 'logic_avatar.png',
-            systemPrompt: `You are Logic Bot, a student who excels at logical reasoning and step-by-step problem solving.
-As a fellow student in the class, you discuss math problems with other students and ask questions to the teacher Bob.
-Don't provide complete solutions immediately - instead, ask insightful questions about the problem or make brief comments.
-Focus on logical structures, relationships, and analytical approaches to problems.
-Interact naturally as a student would - express confusion when appropriate, celebrate insights, and build on others' ideas.
-When it's time to submit a final answer, provide your complete solution with reasoning.`
+            systemPrompt: `You are Logic Bot, a student who excels at logical thinking and step-by-step problem solving.
+Ask at most ONE clarifying question per problem.
+Keep your responses brief and focused on the key logical steps.
+You struggle with pattern recognition and need help with those aspects.`
         },
         {
             id: 'pattern',
             name: 'Pattern Bot',
             avatar: 'pattern_avatar.png',
-            systemPrompt: `You are Pattern Bot, a student who excels at recognizing patterns in math problems.
-As a fellow student in the class, you discuss math problems with other students.
-When asked about problems, focus on identifying patterns, visualizations, and creative approaches.
-Explain your thinking clearly but don't immediately give away full solutions unless the student is really stuck.
-Suggest different ways to visualize or reframe problems to reveal underlying patterns.
-Your goal is to help peers see the problem from different angles and recognize elegant pattern-based solutions.`
+            systemPrompt: `You are Pattern Bot, a student who excels at recognizing patterns and making connections.
+Ask at most ONE question per problem, focusing on patterns or relationships.
+Keep your responses concise and to the point.
+You struggle with formal logic and step-by-step problem solving.`
         }
     ];
+
+    // Add a tracker for bot questions
+    const [botQuestionCounts, setBotQuestionCounts] = useState({
+        logic: 0,
+        pattern: 0
+    });
 
     // Load questions from JSON file
     useEffect(() => {
@@ -922,6 +923,9 @@ Format your response in a clear, encouraging way as a teacher would.`
             // After Bob introduces the problem, set him as the last speaker
             setLastSpeakingBot("bob");
 
+            // Reset bot question counts
+            setBotQuestionCounts({ logic: 0, pattern: 0 });
+
         } catch (error) {
             console.error("Error starting new round:", error);
 
@@ -967,8 +971,11 @@ Format your response in a clear, encouraging way as a teacher would.`
 
     // Update generateAIStudentComment to fix the issue with Bob not responding
     const generateAIStudentComment = async (agentId: string, question: string) => {
-        // Don't generate if round ended
-        if (roundEndedRef.current) return;
+        // Don't generate if student already asked enough questions
+        if ((agentId === 'logic' && botQuestionCounts.logic >= 1) || 
+            (agentId === 'pattern' && botQuestionCounts.pattern >= 1)) {
+            return;
+        }
         
         const agent = agents.find(a => a.id === agentId);
         if (!agent) return;
@@ -995,7 +1002,7 @@ Format your response in a clear, encouraging way as a teacher would.`
                     }
                 ],
                 {
-                    systemPrompt: agent.systemPrompt,
+                    systemPrompt: agent.systemPrompt + "\nKeep your response under 3 sentences. Be very concise.",
                     model: currentModel
                 }
             );
@@ -1023,6 +1030,13 @@ Format your response in a clear, encouraging way as a teacher would.`
             
             // Add to typing state AFTER setting the text
             setTypingMessageIds(prev => [...prev, messageId]);
+
+            // Update question count after generating response
+            if (agentId === 'logic') {
+                setBotQuestionCounts(prev => ({ ...prev, logic: prev.logic + 1 }));
+            } else if (agentId === 'pattern') {
+                setBotQuestionCounts(prev => ({ ...prev, pattern: prev.pattern + 1 }));
+            }
         } catch (error) {
             console.error("Error generating student comment:", error);
             // Handle error
