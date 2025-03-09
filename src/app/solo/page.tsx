@@ -36,6 +36,9 @@ export default function TestPage() {
     // 1. Add a ref to reliably track answers
     const answersRef = useRef<string[]>([]);
 
+    // Add state to track when the solution is showing
+    const [showingSolution, setShowingSolution] = useState(false);
+
     // Format time function (matching the group page implementation)
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -165,67 +168,32 @@ export default function TestPage() {
 
     // 4. Simplified auto-submit with immediate advance
     const autoSubmitTimeoutAnswer = () => {
-        console.log("Time's up! Auto-submitting answer and advancing.");
+        console.log("Auto-submitting answer due to timeout");
         
-        if (roundEndedRef.current) return;
+        // Save "NO ANSWER" as the response
+        saveAnswer(currentQuestionIndex, "NO ANSWER");
+        
+        // Show solution
+        setShowingSolution(true);
         roundEndedRef.current = true;
-        
-        // Stop the timer
-        if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-        }
-        
-        // Directly modify the answers ref without showing to user
-        const currentIndex = currentQuestionIndex;
-        answersRef.current[currentIndex] = "NO ANSWER - TIME EXPIRED";
-        
-        // Update state for storage only, but don't show to user
-        setUserAnswers([...answersRef.current]);
-        
-        // Immediately advance to next question if available
-        if (currentIndex < allQuestions.length - 1) {
-            // Move to next question - no delay
-            setCurrentQuestionIndex(currentIndex + 1);
-        } else {
-            // If this was the last question, check if all questions are answered
-            const allAnswered = answersRef.current.every(a => a && a.trim() !== '');
-            setAllQuestionsAnswered(allAnswered);
-        }
     };
 
     // 5. Simplified handleSubmitAnswer with immediate advance
     const handleSubmitAnswer = () => {
-        if (roundEndedRef.current) return;
-        roundEndedRef.current = true;
+        if (!currentAnswer.trim()) return;
+        
+        // Save the answer
+        saveAnswer(currentQuestionIndex, currentAnswer);
+        
+        // Show solution instead of advancing
+        setShowingSolution(true);
         
         // Stop the timer
         if (timerRef.current) {
-            clearInterval(timerRef.current);
+            clearTimeout(timerRef.current);
             timerRef.current = null;
         }
-        
-        // Save answer directly to ref
-        answersRef.current[currentQuestionIndex] = currentAnswer;
-        
-        // Update state for rendering
-        setUserAnswers([...answersRef.current]);
-        
-        console.log("Answers after submit:", answersRef.current);
-        
-        // Check if all questions are answered
-        const allAnswered = answersRef.current.every(a => a && a.trim() !== '');
-        setAllQuestionsAnswered(allAnswered);
-        
-        // Immediately advance to next question if not the last one
-        const currentIdx = currentQuestionIndex;
-        if (currentIdx < allQuestions.length - 1) {
-            console.log(`Auto-advancing from question ${currentIdx + 1} to ${currentIdx + 2}`);
-            // Immediately advance - no delay
-            setCurrentQuestionIndex(currentIdx + 1);
-        } else {
-            console.log("On last question, not advancing");
-        }
+        roundEndedRef.current = true;
     };
 
     // Also set a very short timer for testing to ensure auto-advance works
@@ -243,19 +211,14 @@ export default function TestPage() {
 
     // 6. Simplified handleNextQuestion
     const handleNextQuestion = () => {
-        // Save current answer to ref
-        answersRef.current[currentQuestionIndex] = currentAnswer;
-        
-        // Update state for rendering
-        setUserAnswers([...answersRef.current]);
-        
-        // Check if all answers are provided
-        const allAnswered = answersRef.current.every(a => a && a.trim() !== '');
-        setAllQuestionsAnswered(allAnswered);
-        
-        // Move to next question if not at the end
         if (currentQuestionIndex < allQuestions.length - 1) {
-            setCurrentQuestionIndex(currentQuestionIndex + 1);
+            setCurrentQuestionIndex(prevIndex => prevIndex + 1);
+            setCurrentAnswer(userAnswers[currentQuestionIndex + 1] || '');
+            setShowingSolution(false); // Reset solution state
+            
+            // Reset timer for next question
+            setTimeLeft(120);
+            roundEndedRef.current = false;
         }
     };
 
@@ -322,7 +285,6 @@ export default function TestPage() {
             }
         });
 
-        alert(`Test complete! Your score: ${score}/${totalQuestions}`);
         router.push('/break');
     };
 
@@ -364,81 +326,75 @@ export default function TestPage() {
                             {currentQuestion?.question || "Loading question..."}
                         </h2>
 
-                        {/* Working Space */}
-                        <div className="mb-6">
-                            <label className="block text-white text-sm mb-2">
-                                Show your work (required):
-                            </label>
-                            <textarea
-                                ref={workingSpaceRef}
-                                value={workingSpace[currentQuestion?.id || 0] || ""}
-                                onChange={(e) => setWorkingSpace({
-                                    ...workingSpace,
-                                    [currentQuestion?.id || 0]: e.target.value
-                                })}
-                                className="w-full h-48 bg-white bg-opacity-10 text-white border border-gray-600 rounded-lg p-3 resize-none"
-                                placeholder="Show your reasoning here before submitting your final answer..."
-                                    />
+                        {/* Solution display (when showing solution) */}
+                        {showingSolution && (
+                            <div className="bg-purple-800 bg-opacity-30 rounded-md p-6 mb-4 border-2 border-purple-500">
+                                <h3 className="text-white text-lg font-semibold mb-2">Correct Answer:</h3>
+                                <div className="text-white font-medium">
+                                    {currentQuestion?.correctAnswer || 'Answer not available'}
                                 </div>
+                                
+                                <h3 className="text-white text-lg font-semibold mt-4 mb-2">Your Answer:</h3>
+                                <div className={`text-white ${
+                                    (currentAnswer.toLowerCase() === (currentQuestion?.correctAnswer || '').toLowerCase()) 
+                                    ? 'text-green-400' 
+                                    : 'text-red-400'
+                                }`}>
+                                    {currentAnswer || 'NO ANSWER'}
+                                </div>
+                                
+                                {(currentAnswer.toLowerCase() === (currentQuestion?.correctAnswer || '').toLowerCase()) 
+                                    ? <div className="mt-4 text-green-400 font-bold">✓ Correct!</div>
+                                    : <div className="mt-4 text-red-400 font-bold">✗ Incorrect</div>
+                                }
+                            </div>
+                        )}
 
                         {/* Answer Input */}
-                        <div className="flex items-center gap-4">
-                            <input
-                                type="text"
-                                value={currentAnswer || ""}
-                                onChange={(e) => setCurrentAnswer(e.target.value)}
-                                className="flex-1 bg-white bg-opacity-20 text-white border border-gray-600 rounded-lg p-3"
-                                placeholder="Your final answer..."
-                            />
-                            <button
-                                onClick={handleSubmitAnswer}
-                                disabled={!currentAnswer.trim()}
-                                className={`px-6 py-3 rounded-lg ${currentAnswer.trim()
-                                    ? 'bg-green-500 hover:bg-green-600 text-white'
-                                    : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                                    }`}
-                            >
-                                Submit Answer
-                            </button>
-                        </div>
+                        {!showingSolution && (
+                            <div className="flex items-center gap-4">
+                                <input
+                                    type="text"
+                                    value={currentAnswer || ""}
+                                    onChange={(e) => setCurrentAnswer(e.target.value)}
+                                    className="flex-1 bg-white bg-opacity-20 text-white border border-gray-600 rounded-lg p-3"
+                                    placeholder="Your final answer..."
+                                />
+                            </div>
+                        )}
                 </div>
 
                     {/* Navigation */}
                     <div className="flex justify-between">
-                                <button
-                            onClick={handlePrevQuestion}
-                            disabled={currentQuestionIndex === 0}
-                            className={`px-4 py-2 rounded-lg ${currentQuestionIndex > 0
-                                ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                                : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                                }`}
-                        >
-                            Previous Question
+                        {showingSolution ? (
+                            // On last question after showing solution
+                            currentQuestionIndex >= allQuestions.length - 1 ? (
+                                <button 
+                                    onClick={handleFinishTest} 
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-md font-semibold"
+                                >
+                                    Continue
                                 </button>
-
-                                <button
-                                    onClick={handleNextQuestion}
-                            disabled={currentQuestionIndex === allQuestions.length - 1}
-                            className={`px-4 py-2 rounded-lg ${currentQuestionIndex < allQuestions.length - 1
-                                ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                                : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                                }`}
+                            ) : (
+                                // Not on last question, showing solution
+                                <button 
+                                    onClick={handleNextQuestion} 
+                                    className="px-4 py-2 bg-purple-500 text-white rounded-md font-semibold"
                                 >
                                     Next Question
                                 </button>
-                    </div>
-
-                    {/* Change the test complete button to only show when all questions are answered */}
-                    {allQuestionsAnswered && (
-                        <div className="mt-6 text-center">
-                            <button
-                                onClick={handleFinishTest}
-                                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
+                            )
+                        ) : (
+                            // Not showing solution yet
+                            <button 
+                                onClick={handleSubmitAnswer} 
+                                className="px-4 py-2 bg-green-600 text-white rounded-md font-semibold disabled:opacity-50"
+                                disabled={!currentAnswer.trim()}
                             >
-                                Complete Test
+                                Submit Answer
                             </button>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
 
