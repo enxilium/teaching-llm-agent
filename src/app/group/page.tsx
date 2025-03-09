@@ -78,7 +78,7 @@ Your goal is to help peers see the problem from different angles and recognize e
                 const data = await response.json();
                 
                 // Flatten all categories into a single array of questions
-                const questions: string[] = Object.values(data).flat();
+                const questions: string[] = Object.values(data).flat() as string[];
                 
                 setAllQuestions(questions);
                 setLoadedQuestions(true);
@@ -560,10 +560,10 @@ Do not provide any evaluation of student work or suggestions for improvement.`
         setTimeout(() => scrollToBottom(true), 50);
 
         // Check if a specific bot was mentioned
-        const mentionedBot = checkForBotMention(userMessage.text);
+        const mentionedBot = checkForBotMention(userMessage.text || "");
         
         // Generate AI responses based on which bot was mentioned
-        generateAIResponse(userMessage.text, mentionedBot);
+        generateAIResponse(userMessage.text || "", mentionedBot);
     };
 
     // AI response generation

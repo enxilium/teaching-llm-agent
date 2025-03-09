@@ -67,7 +67,7 @@ Your goal is to facilitate learning through guided discovery.`
         const data = await response.json();
 
         // Flatten all categories into a single array of questions
-        const questions: string[] = Object.values(data).flat();
+        const questions: string[] = Object.values(data).flat() as string[];
 
         setAllQuestions(questions);
         setLoadedQuestions(true);
@@ -308,7 +308,7 @@ Your goal is to facilitate learning through guided discovery.`
     setTimeout(() => scrollToBottom(true), 50);
 
     // Generate Bob's response (no need to check which bot was mentioned)
-    generateAIResponse(userMessage.text);
+    generateAIResponse(userMessage.text || "");
   };
 
   // Update the evaluation to only include Bob's assessment
@@ -506,7 +506,7 @@ Format your response in a clear, encouraging way as a teacher would.`
       setFinalAnswer('');
 
       // Generate evaluation
-      generateEvaluation(userFinalAnswer.text, currentQuestion);
+      generateEvaluation(userFinalAnswer.text || "", currentQuestion);
     });
   };
 
@@ -538,7 +538,7 @@ Format your response in a clear, encouraging way as a teacher would.`
       roundEndedRef.current = true;
 
       // Generate evaluation
-      generateEvaluation(userFinalAnswer.text, currentQuestion);
+      generateEvaluation(userFinalAnswer.text || "", currentQuestion);
     });
   };
 

@@ -89,7 +89,7 @@ Your goal is to help peers see the problem from different angles and recognize e
                 const data = await response.json();
 
                 // Flatten all categories into a single array of questions
-                const questions: string[] = Object.values(data).flat();
+                const questions: string[] = Object.values(data).flat() as string[];
 
                 setAllQuestions(questions);
                 setLoadedQuestions(true);
@@ -275,7 +275,7 @@ Your goal is to help peers see the problem from different angles and recognize e
                 setFinalAnswer('');
 
                 // Generate evaluation
-                generateEvaluation(userFinalAnswer.text, currentQuestion);
+                generateEvaluation(userFinalAnswer.text || "", currentQuestion);
             });
     };
 
@@ -417,10 +417,10 @@ Format your response in a structured way that shows the complete solution proces
         setTimeout(() => scrollToBottom(true), 50);
 
         // Check if a specific bot was mentioned
-        const mentionedBot = checkForBotMention(userMessage.text);
+        const mentionedBot = checkForBotMention(userMessage.text || "");
 
         // Generate AI responses based on which bot was mentioned
-        generateAIResponse(userMessage.text, mentionedBot);
+        generateAIResponse(userMessage.text || "", mentionedBot);
     };
 
     // Handle submit/evaluation
@@ -451,7 +451,7 @@ Format your response in a structured way that shows the complete solution proces
             roundEndedRef.current = true;
 
             // Generate evaluation
-            generateEvaluation(userFinalAnswer.text, currentQuestion);
+            generateEvaluation(userFinalAnswer.text || "", currentQuestion);
         });
     };
 

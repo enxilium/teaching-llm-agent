@@ -5,7 +5,7 @@ export interface Message {
     content?: string;
     agentId?: string;
     avatar?: string;
-    timestamp?: Date;
+    timestamp?: string;
     thinking?: boolean;
     isFinalAnswer?: boolean;
     isEvaluation?: boolean;
