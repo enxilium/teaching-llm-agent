@@ -13,92 +13,134 @@ export default function TypewriterText({
   onComplete,
   onCharacterTyped
 }: TypewriterTextProps) {
-  // Store rendered text
-  const [displayedText, setDisplayedText] = useState("");
-
-  // Store animation state in refs to prevent re-renders
+  const [displayText, setDisplayText] = useState('');
+  const [isComplete, setIsComplete] = useState(false);
+  
+  // Use refs to handle animation state
   const animationRef = useRef<number | null>(null);
-  const isAnimatingRef = useRef(true);
   const isMountedRef = useRef(true);
-  const currentIndexRef = useRef(0);
-  const hasCalledCompleteRef = useRef(false);
-
-  useEffect(() => {
-    // Reset state when text changes
-    setDisplayedText("");
-    currentIndexRef.current = 0;
-    isAnimatingRef.current = true;
-    hasCalledCompleteRef.current = false;
-    isMountedRef.current = true;
-
-    // Clean up any existing animation
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-
-    // Function to update text one character at a time
-    const animate = () => {
-      if (!isMountedRef.current || !isAnimatingRef.current) return;
-
-      if (currentIndexRef.current < text.length) {
-        // Get next character
-        const nextChar = text.charAt(currentIndexRef.current);
-        currentIndexRef.current++;
-
-        // Update displayed text
-        setDisplayedText(prev => prev + nextChar);
-
-        // Call character typed callback if provided
-        if (onCharacterTyped) {
-          onCharacterTyped();
-        }
-
-        // Calculate delay based on character type
-        let delay = speed;
-        if (nextChar === ' ') delay = speed * 0.5;
-        if (nextChar === '.' || nextChar === '!' || nextChar === '?') delay = speed * 3;
-        if (nextChar === ',' || nextChar === ';' || nextChar === ':') delay = speed * 2;
-
-        // Schedule next character
-        animationRef.current = window.setTimeout(animate, delay) as any;
+  const chunkIndexRef = useRef(0);
+  
+  // Store the original text to prevent animation restarts
+  const textRef = useRef(text);
+  
+  // Split the text into chunks properly
+  const chunksRef = useRef<string[]>([]);
+  
+  // Create natural, LLM-like chunks that preserve coherence
+  const createNaturalChunks = (text: string): string[] => {
+    // First, create a token-by-token representation
+    // This simulates how an LLM would actually generate text
+    const words = text.split(/(\s+)/);
+    const chunks: string[] = [];
+    
+    // Begin with reasonable chunk size (can be adjusted)
+    let currentChunkSize = 1;
+    let currentChunk = '';
+    let wordIndex = 0;
+    
+    while (wordIndex < words.length) {
+      // Determine how many words to include in this burst
+      // This creates a natural rhythm of faster/slower generation
+      if (wordIndex > 0 && wordIndex % 15 === 0) {
+        // Occasionally pause briefly at natural boundaries by creating a small chunk
+        currentChunkSize = 1;
       } else {
-        // Animation complete
-        isAnimatingRef.current = false;
-
-        // Call completion callback if provided
-        if (!hasCalledCompleteRef.current && onComplete && isMountedRef.current) {
-          hasCalledCompleteRef.current = true;
-          setTimeout(onComplete, 50);
+        // Vary the chunk size to simulate natural generation rhythm
+        // LLMs sometimes generate a burst of words, then slow down at complex points
+        currentChunkSize = Math.floor(Math.random() * 4) + 1;
+      }
+      
+      // Build the current chunk
+      currentChunk += words[wordIndex];
+      
+      // If the current chunk is full, add it to the chunks array
+      if (currentChunk.length >= currentChunkSize) {
+        chunks.push(currentChunk);
+        currentChunk = '';
+      }
+      
+      wordIndex++;
+    }
+    
+    // If there's any remaining text, add it as the last chunk
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
+    
+    return chunks;
+  };
+  
+  useEffect(() => {
+    // Store the text in ref to make it stable
+    textRef.current = text;
+    
+    // Create chunks for LLM-like generation
+    chunksRef.current = createNaturalChunks(text);
+    
+    // Set mounted flag
+    isMountedRef.current = true;
+    chunkIndexRef.current = 0;
+    setDisplayText('');
+    setIsComplete(false);
+    
+    // Start animation
+    startAnimation();
+    
+    return () => {
+      // Clean up animation on unmount
+      isMountedRef.current = false;
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [text]); // Only restart animation when text actually changes
+  
+  const startAnimation = () => {
+    let lastTime = performance.now();
+    
+    const animate = (time: number) => {
+      if (!isMountedRef.current) return;
+      
+      const elapsed = time - lastTime;
+      
+      // Randomize the intervals to simulate natural LLM generation
+      // Shorter chunks appear faster, longer chunks need more time
+      const chunk = chunksRef.current[chunkIndexRef.current] || '';
+      const chunkLength = chunk.length;
+      
+      // Base interval on chunk length and add randomness
+      // Faster overall, with variability for natural flow
+      const randomFactor = Math.random() * 0.5 + 0.5; // 0.5 to 1.0
+      const baseInterval = Math.max(20, 100 - (speed * 2)); // Faster base speed
+      const interval = baseInterval * randomFactor * (chunkLength > 15 ? 1.2 : 0.8);
+      
+      if (elapsed > interval) {
+        lastTime = time;
+        
+        if (chunkIndexRef.current < chunksRef.current.length) {
+          const nextChunk = chunksRef.current[chunkIndexRef.current];
+          setDisplayText(prev => prev + nextChunk);
+          chunkIndexRef.current++;
+          
+          // Call callback for progress tracking
+          if (onCharacterTyped) {
+            onCharacterTyped();
+          }
+        } else if (!isComplete) {
+          setIsComplete(true);
+          if (onComplete) {
+            onComplete();
+          }
+          return; // Stop animation
         }
       }
+      
+      animationRef.current = requestAnimationFrame(animate);
     };
-
-    // Start animation with a small initial delay
-    animationRef.current = window.setTimeout(animate, 50) as any;
-
-    // Cleanup function
-    return () => {
-      isMountedRef.current = false;
-
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
-      }
-
-      // IMPORTANT: Do NOT set full text on unmount
-      // This was causing the jump to end
-
-      // Call completion callback if not already called
-      if (!hasCalledCompleteRef.current && onComplete) {
-        hasCalledCompleteRef.current = true;
-        onComplete();
-      }
-    };
-  }, [text, speed, onComplete, onCharacterTyped]);
-
-  return (
-    <div className="whitespace-pre-wrap message-text">
-      {displayedText}
-      {isAnimatingRef.current && <span className="typing-cursor">▋</span>}
-    </div>
-  );
+    
+    animationRef.current = requestAnimationFrame(animate);
+  };
+  
+  return <div className="whitespace-pre-wrap">{displayText}</div>;
 }

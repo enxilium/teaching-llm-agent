@@ -1,8 +1,14 @@
 export interface Message {
     id: number;
     sender: "user" | "ai" | string;
-    text: string;
+    text?: string;
+    content?: string;
     agentId?: string;
+    avatar?: string;
+    timestamp?: Date;
+    thinking?: boolean;
+    isFinalAnswer?: boolean;
+    isEvaluation?: boolean;
     onComplete?: () => void;
 }
 
