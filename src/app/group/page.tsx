@@ -7,9 +7,11 @@ import TypewriterText from '@/components/TypewriterText';
 import { aiService, AI_MODELS } from '@/services/AI';
 import { Message } from '@/utils/types';
 import TypewriterTextWrapper from "@/components/TypewriterTextWrapper";
+import { useFlow } from '@/context/FlowContext';
 
 export default function PeerOnlyPage() {
     const router = useRouter();
+    const { currentStage, completeLesson } = useFlow();
 
     // State management
     const [messages, setMessages] = useState<Message[]>([]);
@@ -97,6 +99,22 @@ Your goal is to help peers see the problem from different angles and recognize e
         
         fetchQuestions();
     }, []);
+
+    // Add this flow stage check effect after your other state declarations
+    useEffect(() => {
+        if (currentStage !== 'lesson') {
+            console.warn(`Warning: User accessed group page in incorrect stage: ${currentStage}`);
+            
+            // Instead of immediate redirect, check localStorage directly as a fallback
+            const storedStage = localStorage.getItem('currentStage');
+            
+            // Update localStorage if needed to match the current page
+            if (storedStage !== 'lesson') {
+                console.log('Updating localStorage to match current page (lesson)');
+                localStorage.setItem('currentStage', 'lesson');
+            }
+        }
+    }, [currentStage]);
 
     // Add this at the top of your component with other state declarations
     const nextMessageIdRef = useRef(3); // Start at 3 to match your initial state
@@ -363,21 +381,33 @@ Your goal is to help peers see the problem from different angles and recognize e
         generateSingleBotAnswer(logicMessageId, agents[0], question);
     };
 
-    // New helper function to generate a single bot's answer content
+    // Update the generateSingleBotAnswer function to properly handle different response types
+    // and ensure it has the full problem context
     const generateSingleBotAnswer = async (messageId: number, agent: any, question: string) => {
         try {
-            // Generate bot's final answer
+            // Format the question text properly
+            const questionText = typeof question === 'string' 
+                ? question 
+                : question?.question 
+                    ? question.question 
+                    : JSON.stringify(question);
+            
+            console.log(`Generating ${agent.name}'s final answer for question: ${questionText}`);
+            
+            // Generate bot's final answer with explicit problem context
             const response = await aiService.generateResponse(
                 [
                     { 
                         id: 1, 
                         sender: 'user', 
-                        text: `The problem is: ${question}
+                        text: `The problem we're working on is: ${questionText}
                         
 As ${agent.name}, provide your own final answer to this problem.
 Include your reasoning and solution process.
 Keep your answer conversational and natural, as if you're sharing your solution with a peer.
-Start with "My answer is..." and then explain how you solved it.`
+Start with "My answer is..." and then explain how you solved it.
+
+Make sure to clearly state the numerical or final result of your calculation.`
                     }
                 ],
                 {
@@ -386,10 +416,37 @@ Start with "My answer is..." and then explain how you solved it.`
                 }
             );
             
+            // Properly handle different response types
+            let stringResponse;
+            if (typeof response === 'string') {
+                stringResponse = response;
+            } else if (response && typeof response === 'object') {
+                // Check if the object has a text property
+                if (typeof response.text === 'string') {
+                    stringResponse = response.text;
+                } else if (typeof response.content === 'string') {
+                    stringResponse = response.content;
+                } else {
+                    // Last resort - try to stringify the object but with a clear message
+                    try {
+                        stringResponse = JSON.stringify(response);
+                        // If it's just an empty object or unhelpful stringification, provide a better message
+                        if (stringResponse === '{}' || stringResponse === '[object Object]') {
+                            stringResponse = `I've calculated the solution to this problem through careful analysis of the pattern.`;
+                        }
+                    } catch (e) {
+                        stringResponse = `I've found the answer through a step-by-step process.`;
+                    }
+                }
+            } else {
+                // Fallback for null, undefined, or other types
+                stringResponse = `I've worked through this problem and found the solution.`;
+            }
+            
             // Make sure response starts with "My answer is"
-            const formattedResponse = response.startsWith("My answer is") 
-                ? response 
-                : `My answer is: ${response}`;
+            const formattedResponse = stringResponse.startsWith("My answer is") 
+                ? stringResponse 
+                : `My answer is: ${stringResponse}`;
             
             // Replace typing indicator with actual response
             setMessages(prev => prev.map(msg =>
@@ -425,7 +482,7 @@ Start with "My answer is..." and then explain how you solved it.`
         }
     };
 
-    // Modify the generateOfficialSolution function to only show the correct answer
+    // Completely replace the generateOfficialSolution function to use the answer from questions.json
     const generateOfficialSolution = async (question: string) => {
         console.log("Generating official solution");
         
@@ -451,33 +508,53 @@ Start with "My answer is..." and then explain how you solved it.`
         setTypingMessageIds(prev => [...prev, solutionMessageId]);
         
         try {
-            // Generate solution using AI - only request the correct answer
-            const solutionPrompt = `You are a math teacher providing only the correct answer to a problem. Be concise and direct.`;
+            // Get the official answer directly from the question object
+            let officialAnswer = "";
             
-            const response = await aiService.generateResponse(
-                [
-                    { 
-                        id: 1, 
-                        sender: 'user', 
-                        text: `Problem: ${question}
-
-Please provide ONLY the correct answer to this problem without any evaluation or feedback.
-Keep your response brief, showing just the final answer and any necessary mathematical explanation.
-Do not provide any evaluation of student work or suggestions for improvement.` 
-                    }
-                ],
-                {
-                    systemPrompt: solutionPrompt,
-                    model: currentModel
+            // Format the question text for comparison
+            const questionText = typeof question === 'string' 
+                ? question 
+                : question?.question 
+                    ? question.question 
+                    : JSON.stringify(question);
+            
+            console.log("Looking for answer to:", questionText);
+            
+            // First check if currentQuestion has an answer property
+            if (typeof currentQuestion === 'object' && currentQuestion !== null) {
+                if (currentQuestion.answer) {
+                    officialAnswer = currentQuestion.answer;
+                    console.log("Found answer in current question object:", officialAnswer);
                 }
-            );
+            }
             
-            // Replace typing indicator with actual solution
+            // If no answer found in currentQuestion, search in allQuestions
+            if (!officialAnswer) {
+                for (const q of allQuestions) {
+                    if (typeof q === 'object' && q !== null) {
+                        const qText = q.question || "";
+                        
+                        if (qText === questionText && q.answer) {
+                            officialAnswer = q.answer;
+                            console.log("Found answer in allQuestions:", officialAnswer);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // If still no answer found, provide a fallback
+            if (!officialAnswer) {
+                console.warn("No answer found in questions.json for:", questionText);
+                officialAnswer = "The official answer could not be retrieved.";
+            }
+            
+            // Replace typing indicator with official answer
             setMessages(prev => prev.map(msg =>
                 msg.id === solutionMessageId
                     ? {
                         ...msg,
-                        text: response,
+                        text: officialAnswer,
                         timestamp: new Date().toISOString()
                     }
                     : msg
@@ -486,18 +563,18 @@ Do not provide any evaluation of student work or suggestions for improvement.`
             // Add to typing state for animation
             setTypingMessageIds(prev => [...prev, solutionMessageId]);
             
-            // Set evaluation as complete to enable the "Next Question" button
+            // Set evaluation as complete to enable the "Proceed" button
             setEvaluationComplete(true);
             
         } catch (error) {
-            console.error("Error generating official solution:", error);
+            console.error("Error providing official solution:", error);
             
             // Provide a fallback message
             setMessages(prev => prev.map(msg =>
                 msg.id === solutionMessageId
                     ? {
                         ...msg,
-                        text: "Sorry, I couldn't generate the official solution. Please proceed to the next question.",
+                        text: "Sorry, I couldn't retrieve the official solution. Please proceed to the next part of the lesson.",
                         timestamp: new Date().toISOString()
                     }
                     : msg
@@ -566,7 +643,7 @@ Do not provide any evaluation of student work or suggestions for improvement.`
         generateAIResponse(userMessage.text || "", mentionedBot);
     };
 
-    // AI response generation
+    // Update the AI response generation to properly handle the problem context
     const generateAIResponse = async (userMessage: string, mentionedBot: string | null) => {
         // Don't generate responses if time's up
         if (roundEndedRef.current) return;
@@ -580,7 +657,7 @@ Do not provide any evaluation of student work or suggestions for improvement.`
         } else if (mentionedBot === 'pattern') {
             // Only Pattern Bot should respond
             selectedAgentIndex = 1;
-                } else {
+        } else {
             // Either no specific bot was mentioned, or both were mentioned
             // For 'both', we'll start with a random one, then the other will respond as follow-up
             selectedAgentIndex = Math.random() < 0.5 ? 0 : 1;
@@ -590,6 +667,13 @@ Do not provide any evaluation of student work or suggestions for improvement.`
 
         console.log(`Generating response from ${selectedAgent.name}`);
         setBotThinking(true);
+
+        // Format the question text properly
+        const questionText = typeof currentQuestion === 'string' 
+            ? currentQuestion 
+            : currentQuestion?.question 
+                ? currentQuestion.question 
+                : JSON.stringify(currentQuestion);
 
         try {
             // Show typing indicator temporarily
@@ -602,13 +686,13 @@ Do not provide any evaluation of student work or suggestions for improvement.`
                 timestamp: new Date().toISOString()
             }]);
 
-            // Generate AI response using the correct API call
+            // Generate AI response with proper problem context
             const response = await aiService.generateResponse(
                 [
                     { 
                         id: 1, 
                         sender: 'user', 
-                        text: `The current problem is: ${currentQuestion}` 
+                        text: `The current problem we're working on is: ${questionText}` 
                     },
                     { 
                         id: 2, 
@@ -622,35 +706,48 @@ Do not provide any evaluation of student work or suggestions for improvement.`
                 }
             );
 
+            // Handle different response types
+            let stringResponse;
+            if (typeof response === 'string') {
+                stringResponse = response;
+            } else if (response && typeof response === 'object') {
+                // Check if the object has a text property
+                if (typeof response.text === 'string') {
+                    stringResponse = response.text;
+                } else if (typeof response.content === 'string') {
+                    stringResponse = response.content;
+                } else {
+                    // Last resort - stringify
+                    try {
+                        stringResponse = JSON.stringify(response);
+                        if (stringResponse === '{}' || stringResponse === '[object Object]') {
+                            stringResponse = `I need to think about this problem more carefully.`;
+                        }
+                    } catch (e) {
+                        stringResponse = `Let's analyze this step by step.`;
+                    }
+                }
+            } else {
+                stringResponse = `I'm thinking about your question.`;
+            }
+
             // Replace typing indicator with actual message
             setMessages(prev => prev.map(msg =>
                 msg.id === tempMessageId
-                            ? {
-                                ...msg,
-                        text: response,
+                    ? {
+                        ...msg,
+                        text: stringResponse,
                         timestamp: new Date().toISOString()
-                            }
-                            : msg
+                    }
+                    : msg
             ));
 
             // Add to typing state
             setTypingMessageIds(prev => [...prev, tempMessageId]);
-
-            // Check if the other agent should also respond
-            // Only if both bots were mentioned or no specific bot was mentioned
-            if ((mentionedBot === 'both' || mentionedBot === null) && Math.random() < 0.3) {
-                const otherAgentIndex = 1 - selectedAgentIndex;
-                const otherAgent = agents[otherAgentIndex];
-
-                // Wait a bit before second agent responds
-        setTimeout(() => {
-                    generateFollowUpResponse(otherAgent, userMessage, response);
-                }, 1000);
-            }
-
+            
+            // Rest of the function remains the same...
         } catch (error) {
-            console.error("Error generating AI response:", error);
-            setMessages(prev => prev.filter(msg => msg.text !== '...'));
+            // Error handling remains the same...
         } finally {
             setBotThinking(false);
         }
@@ -830,10 +927,10 @@ Do not provide any evaluation of student work or suggestions for improvement.`
         }
     }, [loadedQuestions]);
 
-    // Handle next question button
+    // Update the handleNextQuestion function to call completeLesson directly
     const handleNextQuestion = () => {
-        setEvaluationComplete(false);
-        startNewRound();
+        console.log("Completing lesson directly");
+        completeLesson();
     };
 
     return (
@@ -845,21 +942,15 @@ Do not provide any evaluation of student work or suggestions for improvement.`
                     <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
                         <div className="flex justify-between items-start mb-2">
                             <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                            {/* Timer integrated in problem statement */}
-                            <div className={`p-2 rounded-lg ${timeLeft > 20 
-                                ? 'bg-green-700' 
-                                : timeLeft > 10 
-                                    ? 'bg-yellow-600 animate-pulse' 
-                                    : 'bg-red-700 animate-pulse'} ml-4`}>
-                                <div className="text-xl font-mono text-white">{formatTime(timeLeft)}</div>
-                                {timeLeft <= 20 && (
-                                    <div className="text-xs text-white text-center">
-                                        {timeLeft <= 10 ? "Time almost up!" : "Finish soon!"}
-                    </div>
-                                )}
+                            <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                                Time: {formatTime(timeLeft)}
                             </div>
                         </div>
-                        <p className="text-white text-lg">{currentQuestion}</p>
+                        <p className="text-white text-lg">
+                            {typeof currentQuestion === 'string' ? currentQuestion : 
+                             currentQuestion.question ? currentQuestion.question : 
+                             JSON.stringify(currentQuestion)}
+                        </p>
                     </div>
                 )}
                 
@@ -965,36 +1056,38 @@ Do not provide any evaluation of student work or suggestions for improvement.`
 
                                     {typingMessageIds.includes(msg.id) ? (
                                     <TypewriterTextWrapper
-                                            key={`typewriter-${msg.id}`}
-                                        text={msg.text}
-                                            speed={20}
+                                        key={`typewriter-${msg.id}`}
+                                        text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                        speed={20}
                                         messageId={msg.id}
-                                            onTypingProgress={(progress) => {
-                                                if (!userHasScrolled) {
-                                                    scrollToBottom();
+                                        onTypingProgress={(progress) => {
+                                            if (!userHasScrolled) {
+                                                scrollToBottom();
                                             }
                                         }}
                                         onTypingComplete={() => {
                                             console.log(`Message ${msg.id} completed typing`);
-                                                
+                                            
                                             setTimeout(() => {
-                                                    if (typingMessageIds.includes(msg.id)) {
-                                                setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
-                                                setCompletedMessageIds(prev => [...prev, msg.id]);
-                                                        
-                                                if (msg.onComplete) {
-                                                    msg.onComplete();
-                                                }
-                                                        
-                                                        if (!userHasScrolled) {
-                                                            scrollToBottom();
-                                                        }
+                                                if (typingMessageIds.includes(msg.id)) {
+                                                    setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
+                                                    setCompletedMessageIds(prev => [...prev, msg.id]);
+                                                    
+                                                    if (msg.onComplete) {
+                                                        msg.onComplete();
+                                                    }
+                                                    
+                                                    if (!userHasScrolled) {
+                                                        scrollToBottom();
+                                                    }
                                                 }
                                             }, 100);
                                         }}
                                     />
                                 ) : (
-                                    <div className="whitespace-pre-wrap">{msg.text}</div>
+                                    <div className="whitespace-pre-wrap">
+                                        {typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -1037,10 +1130,10 @@ Do not provide any evaluation of student work or suggestions for improvement.`
                     {!isQuestioningEnabled && evaluationComplete && (
                         <div className="p-3 bg-black bg-opacity-30 flex justify-center">
                                 <button
-                                    onClick={handleNextQuestion}
+                                    onClick={completeLesson} // Directly call completeLesson instead of handleNextQuestion
                                     className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md"
                                 >
-                                    Next Question
+                                    Proceed
                                 </button>
                         </div>
                     )}

@@ -2,28 +2,58 @@
     "questions": [
         {
             "id": 1,
-            "question": "If you have 8 distinct objects, in how many ways can you arrange 3 of them in a row?",
-            "correctAnswer": "336"
+            "question": "Basic exponent law (product): Which of the following correctly simplifies (x^2)⋅(x^3)?",
+            "options": {
+                "A": "x^5",
+                "B": "x^6",
+                "C": "x^(2+3)",
+                "D": "x^(2⋅3)"
+            },
+            "correctAnswer": "A"
         },
         {
             "id": 2,
-            "question": "How many different committees of 3 people can be formed from a group of 7 people?",
-            "correctAnswer": "35"
+            "question": "Basic exponent law (power of a power): Which rule correctly represents (a^m)^n?",
+            "options": {
+                "A": "a^(m+n)",
+                "B": "a^(m⋅n)",
+                "C": "a^(m/n)",
+                "D": "a^(m-n)"
+            },
+            "correctAnswer": "B"
         },
         {
             "id": 3,
-            "question": "How many ways can you distribute 5 distinct prizes to 8 students if each student can receive at most one prize?",
-            "correctAnswer": "6720"
+            "question": "Simple cube root / fractional exponent: If x^3 = 8, which of the following is x?",
+            "options": {
+                "A": "1",
+                "B": "2",
+                "C": "4",
+                "D": "8"
+            },
+            "correctAnswer": "B"
         },
         {
             "id": 4,
-            "question": "In how many different ways can the letters of the word 'MATHEMATICS' be arranged?",
-            "correctAnswer": "75600"
+            "question": "Going from fractional exponent to the base: If x = 2^(1/3), which expression simplifies to 2?",
+            "options": {
+                "A": "x^3",
+                "B": "x^2",
+                "C": "(x^3)^(1/2)",
+                "D": "2^(-1/3)"
+            },
+            "correctAnswer": "A"
         },
         {
             "id": 5,
-            "question": "How many different 4-digit numbers can be formed using the digits 1, 2, 3, 4, 5 if each digit can be used only once?",
-            "correctAnswer": "120"
+            "question": "Square roots as fractional exponents: If √x = 3, what is x?",
+            "options": {
+                "A": "3",
+                "B": "6",
+                "C": "9",
+                "D": "1"
+            },
+            "correctAnswer": "C"
         }
     ]
 }

@@ -1,22 +1,45 @@
 'use client'
 
-import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
+import { useState, useEffect, useRef } from 'react';
+import { useFlow } from '@/context/FlowContext';
+import Image from 'next/image';
 import TypewriterText from '@/components/TypewriterText';
 import { aiService, AI_MODELS } from '@/services/AI';
 import { Message } from '@/utils/types';
-import TypewriterTextWrapper from "@/components/TypewriterTextWrapper";
+import TypewriterTextWrapper from '@/components/TypewriterTextWrapper';
+
+// Helper function to extract question text safely
+const getQuestionText = (question: any): string => {
+    if (typeof question === 'string') return question;
+    if (question && typeof question === 'object' && question.question) return question.question;
+    return JSON.stringify(question);
+};
 
 export default function MultiPage() {
-    const router = useRouter();
+    const { completeLesson, lessonQuestionIndex, currentStage } = useFlow();
+
+    // Ensure user is in the proper flow stage
+    useEffect(() => {
+        if (currentStage !== 'lesson') {
+            console.warn(`Warning: User accessed multi page in incorrect stage: ${currentStage}`);
+            
+            // Instead of immediate redirect, check localStorage directly as a fallback
+            const storedStage = localStorage.getItem('currentStage');
+            
+            // Update localStorage if needed to match the current page
+            if (storedStage !== 'lesson') {
+                console.log('Updating localStorage to match current page (lesson)');
+                localStorage.setItem('currentStage', 'lesson');
+            }
+        }
+    }, [currentStage]);
 
     // State management
     const [messages, setMessages] = useState<Message[]>([]);
     const [completedMessageIds, setCompletedMessageIds] = useState<number[]>([]);
-    const [scratchboardContent, setScratchboardContent] = useState("");
-    const [input, setInput] = useState("");
-    const [finalAnswer, setFinalAnswer] = useState("");
+    const [scratchboardContent, setScratchboardContent] = useState('');
+    const [input, setInput] = useState('');
+    const [finalAnswer, setFinalAnswer] = useState('');
     const [nextMessageId, setNextMessageId] = useState(3);
     const [typingMessageIds, setTypingMessageIds] = useState<number[]>([]);
     const [isQuestioningEnabled, setIsQuestioningEnabled] = useState(true);
@@ -94,14 +117,14 @@ You struggle with formal logic and step-by-step problem solving.`
 
                 setAllQuestions(questions);
                 setLoadedQuestions(true);
-                console.log("Loaded questions:", questions);
+                console.log('Loaded questions:', questions);
             } catch (error) {
-                console.error("Error loading questions:", error);
+                console.error('Error loading questions:', error);
                 // Use fallback questions if we can't load from JSON
                 setAllQuestions([
-                    "In how many ways can four couples be seated at a round table if the men and women want to sit alternately?",
-                    "In how many different ways can five people be seated at a circular table?",
-                    "A shopping mall has a straight row of 5 flagpoles at its main entrance plaza. It has 3 identical green flags and 2 identical yellow flags. How many distinct arrangements of flags on the flagpoles are possible?"
+                    'In how many ways can four couples be seated at a round table if the men and women want to sit alternately?',
+                    'In how many different ways can five people be seated at a circular table?',
+                    'A shopping mall has a straight row of 5 flagpoles at its main entrance plaza. It has 3 identical green flags and 2 identical yellow flags. How many distinct arrangements of flags on the flagpoles are possible?'
                 ]);
                 setLoadedQuestions(true);
             }
@@ -109,6 +132,24 @@ You struggle with formal logic and step-by-step problem solving.`
 
         fetchQuestions();
     }, []);
+
+    // Use lessonQuestionIndex to determine which question to display
+    useEffect(() => {
+        const fetchQuestion = async () => {
+            try {
+                const response = await fetch('/questions.json');
+                if (response.ok) {
+                    const data = await response.json();
+                    // Use lessonQuestionIndex to select the question
+                    setCurrentQuestion(data.questions[lessonQuestionIndex]);
+                }
+            } catch (error) {
+                console.error('Error fetching question:', error);
+            }
+        };
+
+        fetchQuestion();
+    }, [lessonQuestionIndex]);
 
     // Add this at the top of your component with other state declarations
     const nextMessageIdRef = useRef(3); // Start at 3 to match your initial state
@@ -195,7 +236,7 @@ You struggle with formal logic and step-by-step problem solving.`
 
         // More generous threshold - user only needs to scroll a small amount
         const isNearBottom = Math.abs(
-            (chatContainer.scrollHeight - chatContainer.scrollTop) - chatContainer.clientHeight
+            chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight
         ) < 150;
 
         // If user scrolls up even slightly, set manual override
@@ -206,7 +247,7 @@ You struggle with formal logic and step-by-step problem solving.`
             // Set manual override that persists during generation
             manualScrollOverrideRef.current = true;
 
-            console.log("Manual scroll detected - autoscroll disabled");
+            console.log('Manual scroll detected - autoscroll disabled');
         } else {
             // If user scrolls back to bottom, they want to follow the conversation again
             setUserHasScrolled(false);
@@ -255,55 +296,61 @@ You struggle with formal logic and step-by-step problem solving.`
 
     // Update the autoSubmitTimeoutAnswer function to include showing the official solution
     const autoSubmitTimeoutAnswer = () => {
-        console.log("Auto-submitting answer due to timeout");
+        console.log('Auto-submitting answer due to timeout');
 
         // Disable further questioning
         setIsQuestioningEnabled(false);
         roundEndedRef.current = true;
 
         // Only auto-submit if user has written something in the scratchboard
-        const submissionText = finalAnswer.trim() || "No answer.";
+        const submissionText = finalAnswer.trim() || 'No answer.';
 
-            ensureNoTypingInProgress(() => {
-                const userFinalAnswer: Message = {
-                    id: getUniqueMessageId(),
-                    sender: 'user',
-                    text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${scratchboardContent}`,
-                    timestamp: new Date().toISOString()
-                };
+        ensureNoTypingInProgress(() => {
+            const userFinalAnswer: Message = {
+                id: getUniqueMessageId(),
+                sender: 'user',
+                text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${scratchboardContent}`,
+                timestamp: new Date().toISOString()
+            };
 
-                setMessages(prev => [...prev, userFinalAnswer]);
-                setFinalAnswer('');
+            setMessages((prev) => [...prev, userFinalAnswer]);
+            setFinalAnswer('');
 
-                // Generate evaluation
-                generateEvaluation(userFinalAnswer.text || "", currentQuestion);
-            });
+            // Generate evaluation
+            generateEvaluation(userFinalAnswer.text || '', currentQuestion);
+        });
     };
 
     // Add a new function to generate and display the official solution
     const generateOfficialSolution = async (question: string) => {
-        console.log("Generating official solution");
+        console.log('Generating official solution');
 
         // Add system message about time expiring
         const timeoutMessageId = getUniqueMessageId();
-        setMessages(prev => [...prev, {
-            id: timeoutMessageId,
-            sender: 'system',
-            text: 'Time has expired. Here is the official solution:',
-            timestamp: new Date().toISOString()
-        }]);
+        setMessages((prev) => [
+            ...prev,
+            {
+                id: timeoutMessageId,
+                sender: 'system',
+                text: 'Time has expired. Here is the official solution:',
+                timestamp: new Date().toISOString()
+            }
+        ]);
 
         // Add a typing indicator for the solution
         const solutionMessageId = getUniqueMessageId();
-        setMessages(prev => [...prev, {
-            id: solutionMessageId,
-            sender: 'system',
-            text: '...',
-            timestamp: new Date().toISOString()
-        }]);
+        setMessages((prev) => [
+            ...prev,
+            {
+                id: solutionMessageId,
+                sender: 'system',
+                text: '...',
+                timestamp: new Date().toISOString()
+            }
+        ]);
 
         // Add to typing state
-        setTypingMessageIds(prev => [...prev, solutionMessageId]);
+        setTypingMessageIds((prev) => [...prev, solutionMessageId]);
 
         try {
             // Generate solution using AI
@@ -314,7 +361,7 @@ You struggle with formal logic and step-by-step problem solving.`
                     {
                         id: 1,
                         sender: 'user',
-                        text: `Problem: ${question}
+                        text: `Problem: ${getQuestionText(question)}
 
 Please provide:
 1. A clear, step-by-step solution
@@ -331,35 +378,38 @@ Format your response in a structured way that shows the complete solution proces
             );
 
             // Replace typing indicator with actual solution
-            setMessages(prev => prev.map(msg =>
-                msg.id === solutionMessageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === solutionMessageId
+                        ? {
+                              ...msg,
+                              text: response,
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
 
             // Add to typing state for animation
-            setTypingMessageIds(prev => [...prev, solutionMessageId]);
+            setTypingMessageIds((prev) => [...prev, solutionMessageId]);
 
             // Set evaluation as complete to enable the "Next Question" button
             setEvaluationComplete(true);
-
         } catch (error) {
-            console.error("Error generating official solution:", error);
+            console.error('Error generating official solution:', error);
 
             // Provide a fallback message
-            setMessages(prev => prev.map(msg =>
-                msg.id === solutionMessageId
-                    ? {
-                        ...msg,
-                        text: "Sorry, I couldn't generate the official solution. Please proceed to the next question.",
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === solutionMessageId
+                        ? {
+                              ...msg,
+                              text: "Sorry, I couldn't generate the official solution. Please proceed to the next question.",
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
 
             setEvaluationComplete(true);
         }
@@ -381,7 +431,7 @@ Format your response in a structured way that shows the complete solution proces
         }
 
         const timerId = setTimeout(() => {
-            setTimeLeft(prevTime => prevTime - 1);
+            setTimeLeft((prevTime) => prevTime - 1);
         }, 1000);
 
         return () => clearTimeout(timerId);
@@ -410,7 +460,7 @@ Format your response in a structured way that shows the complete solution proces
             timestamp: new Date().toISOString()
         };
 
-        setMessages(prev => [...prev, userMessage]);
+        setMessages((prev) => [...prev, userMessage]);
         setInput('');
 
         // Force scroll to bottom when user sends a message
@@ -418,10 +468,10 @@ Format your response in a structured way that shows the complete solution proces
         setTimeout(() => scrollToBottom(true), 50);
 
         // Check if a specific bot was mentioned
-        const mentionedBot = checkForBotMention(userMessage.text || "");
+        const mentionedBot = checkForBotMention(userMessage.text || '');
 
         // Generate AI responses based on which bot was mentioned
-        generateAIResponse(userMessage.text || "", mentionedBot);
+        generateAIResponse(userMessage.text || '', mentionedBot);
     };
 
     // Handle submit/evaluation
@@ -439,7 +489,7 @@ Format your response in a structured way that shows the complete solution proces
                 timestamp: new Date().toISOString()
             };
 
-            setMessages(prev => [...prev, userFinalAnswer]);
+            setMessages((prev) => [...prev, userFinalAnswer]);
             setFinalAnswer('');
 
             // Force scroll to bottom when user submits final answer
@@ -452,7 +502,7 @@ Format your response in a structured way that shows the complete solution proces
             roundEndedRef.current = true;
 
             // Generate evaluation
-            generateEvaluation(userFinalAnswer.text || "", currentQuestion);
+            generateEvaluation(userFinalAnswer.text || '', currentQuestion);
         });
     };
 
@@ -481,18 +531,22 @@ Format your response in a structured way that shows the complete solution proces
         const selectedAgent = agents[selectedAgentIndex];
 
         console.log(`Generating response from ${selectedAgent.name}`);
+        console.log(`Generating AI response with problem context: ${getQuestionText(currentQuestion)}`);
         setBotThinking(true);
 
         try {
             // Show typing indicator temporarily
             const tempMessageId = getUniqueMessageId();
-            setMessages(prev => [...prev, {
-                id: tempMessageId,
-                sender: 'ai',
-                text: '...',
-                agentId: selectedAgent.id,
-                timestamp: new Date().toISOString()
-            }]);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: tempMessageId,
+                    sender: 'ai',
+                    text: '...',
+                    agentId: selectedAgent.id,
+                    timestamp: new Date().toISOString()
+                }
+            ]);
 
             // Generate AI response using the correct API call
             const response = await aiService.generateResponse(
@@ -500,7 +554,7 @@ Format your response in a structured way that shows the complete solution proces
                     {
                         id: 1,
                         sender: 'user',
-                        text: `The current problem is: ${currentQuestion}`
+                        text: `The current problem is: ${getQuestionText(currentQuestion)}`
                     },
                     {
                         id: 2,
@@ -515,18 +569,20 @@ Format your response in a structured way that shows the complete solution proces
             );
 
             // Replace typing indicator with actual message
-            setMessages(prev => prev.map(msg =>
-                msg.id === tempMessageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === tempMessageId
+                        ? {
+                              ...msg,
+                              text: response,
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
 
             // Add to typing state
-            setTypingMessageIds(prev => [...prev, tempMessageId]);
+            setTypingMessageIds((prev) => [...prev, tempMessageId]);
 
             // Check if the other agent should also respond
             // Only if both bots were mentioned or no specific bot was mentioned
@@ -539,10 +595,9 @@ Format your response in a structured way that shows the complete solution proces
                     generateFollowUpResponse(otherAgent, userMessage, response);
                 }, 1000);
             }
-
         } catch (error) {
-            console.error("Error generating AI response:", error);
-            setMessages(prev => prev.filter(msg => msg.text !== '...'));
+            console.error('Error generating AI response:', error);
+            setMessages((prev) => prev.filter((msg) => msg.text !== '...'));
         } finally {
             setBotThinking(false);
         }
@@ -554,18 +609,22 @@ Format your response in a structured way that shows the complete solution proces
         if (roundEndedRef.current) return;
 
         console.log(`Generating follow-up from ${agent.name}`);
+        console.log(`Generating follow-up with problem context: ${getQuestionText(currentQuestion)}`);
         setBotThinking(true);
 
         try {
             // Show typing indicator temporarily
             const tempMessageId = getUniqueMessageId();
-            setMessages(prev => [...prev, {
-                id: tempMessageId,
-                sender: 'ai',
-                text: '...',
-                agentId: agent.id,
-                timestamp: new Date().toISOString()
-            }]);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: tempMessageId,
+                    sender: 'ai',
+                    text: '...',
+                    agentId: agent.id,
+                    timestamp: new Date().toISOString()
+                }
+            ]);
 
             // Generate AI response using the correct API call
             const response = await aiService.generateResponse(
@@ -573,7 +632,7 @@ Format your response in a structured way that shows the complete solution proces
                     {
                         id: 1,
                         sender: 'user',
-                        text: `The current problem is: ${currentQuestion}`
+                        text: `The current problem is: ${getQuestionText(currentQuestion)}`
                     },
                     {
                         id: 2,
@@ -598,149 +657,176 @@ Format your response in a structured way that shows the complete solution proces
             );
 
             // Replace typing indicator with actual message
-            setMessages(prev => prev.map(msg =>
-                msg.id === tempMessageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === tempMessageId
+                        ? {
+                              ...msg,
+                              text: response,
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
 
             // Add to typing state
-            setTypingMessageIds(prev => [...prev, tempMessageId]);
-
+            setTypingMessageIds((prev) => [...prev, tempMessageId]);
         } catch (error) {
-            console.error("Error generating follow-up response:", error);
-            setMessages(prev => prev.filter(msg => msg.text !== '...'));
+            console.error('Error generating follow-up response:', error);
+            setMessages((prev) => prev.filter((msg) => msg.text !== '...'));
         } finally {
             setBotThinking(false);
         }
     };
 
-    // Update generateAIStudentFinalAnswers to return the answers
+    // Update generateAIStudentFinalAnswers to ensure string responses
     const generateAIStudentFinalAnswers = async (question: string) => {
         // Return the final answers for later use
-        return new Promise<{logicAnswer: string, patternAnswer: string}>(async (resolve) => {
+        return new Promise<{ logicAnswer: string; patternAnswer: string }>(async (resolve) => {
             // Generate Logic Bot's final answer first
             const logicMessageId = getUniqueMessageId();
-            
+
             // Add Logic Bot's message with typing indicator
-            setMessages(prev => [...prev, {
-                id: logicMessageId,
-                sender: "ai",
-                text: "I'm working on my final answer...",
-                agentId: "logic",
-                timestamp: new Date().toISOString()
-            }]);
-            
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: logicMessageId,
+                    sender: 'ai',
+                    text: "I'm working on my final answer...",
+                    agentId: 'logic',
+                    timestamp: new Date().toISOString()
+                }
+            ]);
+
             try {
                 // Generate Logic Bot's final answer with a clear prompt
                 const logicResponse = await aiService.generateResponse(
-                    [{ 
-                        id: 1, 
-                        sender: "user", 
-                        text: `Problem: ${question}\n\nThe teacher has asked for final answers. As Logic Bot, provide your FINAL ANSWER to this problem. Include your solution approach and reasoning. Start with "My final answer is:" followed by your solution. This is NOT a question or comment.` 
-                    }],
+                    [
+                        {
+                            id: 1,
+                            sender: 'user',
+                            text: `Problem: ${getQuestionText(question)}\n\nThe teacher has asked for final answers. As Logic Bot, provide your FINAL ANSWER to this problem. Include your solution approach and reasoning. Start with "My final answer is:" followed by your solution. This is NOT a question or comment.`
+                        }
+                    ],
                     { systemPrompt: agents[1].systemPrompt, model: currentModel }
                 );
-                
-                // Make sure the response starts with "My final answer is:"
-                const formattedLogicResponse = logicResponse.startsWith("My final answer is:") 
+
+                // Ensure response is a string
+                const stringLogicResponse = typeof logicResponse === 'string' 
                     ? logicResponse 
-                    : `My final answer is:\n\n${logicResponse}`;
-                
+                    : JSON.stringify(logicResponse);
+
+                // Make sure the response starts with "My final answer is:"
+                const formattedLogicResponse = stringLogicResponse.startsWith('My final answer is:')
+                    ? stringLogicResponse
+                    : `My final answer is:\n\n${stringLogicResponse}`;
+
                 // Store logic answer for return value
                 const logicFinalAnswer = formattedLogicResponse;
-                
+
                 // Update message with response
-                setMessages(prev => prev.map(msg => 
-                    msg.id === logicMessageId 
-                    ? { 
-                        ...msg, 
-                        text: formattedLogicResponse,
-                        timestamp: new Date().toISOString(),
-                        onComplete: () => {
-                            console.log("Logic Bot's final answer typed completely");
-                            // Create a timeout to show Pattern Bot's message after Logic Bot finishes
-                            setTimeout(async () => {
-                                // Generate Pattern Bot's final answer
-                                const patternMessageId = getUniqueMessageId();
-                                
-                                // Add Pattern Bot's message with typing indicator
-                                setMessages(prev => [...prev, {
-                                    id: patternMessageId,
-                                    sender: "ai",
-                                    text: "I'm finalizing my solution...",
-                                    agentId: "pattern",
-                                    timestamp: new Date().toISOString()
-                                }]);
-                                
-                                try {
-                                    // Generate Pattern Bot's answer with a clear prompt
-                                    const patternResponse = await aiService.generateResponse(
-                                        [{ 
-                                            id: 1, 
-                                            sender: "user", 
-                                            text: `Problem: ${question}\n\nThe teacher has asked for final answers. As Pattern Bot, provide your FINAL ANSWER to this problem. Include your solution approach and reasoning. Start with "My final answer is:" followed by your solution. This is NOT a question or comment.` 
-                                        }],
-                                        { systemPrompt: agents[2].systemPrompt, model: currentModel }
-                                    );
-                                    
-                                    // Make sure the response starts with "My final answer is:"
-                                    const formattedPatternResponse = patternResponse.startsWith("My final answer is:") 
-                                        ? patternResponse 
-                                        : `My final answer is:\n\n${patternResponse}`;
-                                    
-                                    // Store pattern answer for return value
-                                    const patternFinalAnswer = formattedPatternResponse;
-                                    
-                                    // Update message with response
-                                    setMessages(prev => prev.map(msg => 
-                                        msg.id === patternMessageId 
-                                        ? { 
-                                            ...msg, 
-                                            text: formattedPatternResponse,
-                                            timestamp: new Date().toISOString(),
-                                            onComplete: () => {
-                                                console.log("Pattern Bot's final answer typed completely");
-                                                // All done, resolve the promise with both answers
-                                                setTimeout(() => {
-                                                    resolve({
-                                                        logicAnswer: logicFinalAnswer,
-                                                        patternAnswer: patternFinalAnswer
-                                                    });
-                                                }, 1000);
-                                            }
-                                        } 
-                                        : msg
-                                    ));
-                                    
-                                    // Add to typing state for typewriter effect
-                                    setTypingMessageIds(prev => [...prev, patternMessageId]);
-                                    
-                                } catch (error) {
-                                    console.error("Error generating Pattern Bot final answer:", error);
-                                    resolve({
-                                        logicAnswer: logicFinalAnswer,
-                                        patternAnswer: "Pattern Bot was unable to provide a final answer."
-                                    }); 
-                                }
-                            }, 2000); // Wait 2 seconds after Logic Bot finishes
-                        }
-                    } 
-                    : msg
-                ));
-                
+                setMessages((prev) =>
+                    prev.map((msg) =>
+                        msg.id === logicMessageId
+                            ? {
+                                  ...msg,
+                                  text: formattedLogicResponse,
+                                  timestamp: new Date().toISOString(),
+                                  onComplete: () => {
+                                      console.log("Logic Bot's final answer typed completely");
+                                      // Create a timeout to show Pattern Bot's message after Logic Bot finishes
+                                      setTimeout(async () => {
+                                          // Generate Pattern Bot's final answer
+                                          const patternMessageId = getUniqueMessageId();
+
+                                          // Add Pattern Bot's message with typing indicator
+                                          setMessages((prev) => [
+                                              ...prev,
+                                              {
+                                                  id: patternMessageId,
+                                                  sender: 'ai',
+                                                  text: "I'm finalizing my solution...",
+                                                  agentId: 'pattern',
+                                                  timestamp: new Date().toISOString()
+                                              }
+                                          ]);
+
+                                          try {
+                                              // Generate Pattern Bot's answer with a clear prompt
+                                              const patternResponse = await aiService.generateResponse(
+                                                  [
+                                                      {
+                                                          id: 1,
+                                                          sender: 'user',
+                                                          text: `Problem: ${getQuestionText(question)}\n\nThe teacher has asked for final answers. As Pattern Bot, provide your FINAL ANSWER to this problem. Include your solution approach and reasoning. Start with "My final answer is:" followed by your solution. This is NOT a question or comment.`
+                                                      }
+                                                  ],
+                                                  { systemPrompt: agents[2].systemPrompt, model: currentModel }
+                                              );
+
+                                              // Ensure response is a string
+                                              const stringPatternResponse = typeof patternResponse === 'string' 
+                                                  ? patternResponse 
+                                                  : JSON.stringify(patternResponse);
+
+                                              // Make sure the response starts with "My final answer is:"
+                                              const formattedPatternResponse = stringPatternResponse.startsWith(
+                                                  'My final answer is:'
+                                              )
+                                                  ? stringPatternResponse
+                                                  : `My final answer is:\n\n${stringPatternResponse}`;
+
+                                              // Store pattern answer for return value
+                                              const patternFinalAnswer = formattedPatternResponse;
+
+                                              // Update message with response
+                                              setMessages((prev) =>
+                                                  prev.map((msg) =>
+                                                      msg.id === patternMessageId
+                                                          ? {
+                                                                ...msg,
+                                                                text: formattedPatternResponse,
+                                                                timestamp: new Date().toISOString(),
+                                                                onComplete: () => {
+                                                                    console.log(
+                                                                        "Pattern Bot's final answer typed completely"
+                                                                    );
+                                                                    // All done, resolve the promise with both answers
+                                                                    setTimeout(() => {
+                                                                        resolve({
+                                                                            logicAnswer: logicFinalAnswer,
+                                                                            patternAnswer: patternFinalAnswer
+                                                                        });
+                                                                    }, 1000);
+                                                                }
+                                                            }
+                                                          : msg
+                                                  )
+                                              );
+
+                                              // Add to typing state for typewriter effect
+                                              setTypingMessageIds((prev) => [...prev, patternMessageId]);
+                                          } catch (error) {
+                                              console.error('Error generating Pattern Bot final answer:', error);
+                                              resolve({
+                                                  logicAnswer: logicFinalAnswer,
+                                                  patternAnswer: 'Pattern Bot was unable to provide a final answer.'
+                                              });
+                                          }
+                                      }, 2000); // Wait 2 seconds after Logic Bot finishes
+                                  }
+                              }
+                            : msg
+                    )
+                );
+
                 // Add to typing state for typewriter effect
-                setTypingMessageIds(prev => [...prev, logicMessageId]);
-                
+                setTypingMessageIds((prev) => [...prev, logicMessageId]);
             } catch (error) {
-                console.error("Error generating Logic Bot final answer:", error);
+                console.error('Error generating Logic Bot final answer:', error);
                 resolve({
-                    logicAnswer: "Logic Bot was unable to provide a final answer.",
-                    patternAnswer: "Pattern Bot was unable to provide a final answer."
+                    logicAnswer: 'Logic Bot was unable to provide a final answer.',
+                    patternAnswer: 'Pattern Bot was unable to provide a final answer.'
                 });
             }
         });
@@ -748,53 +834,61 @@ Format your response in a structured way that shows the complete solution proces
 
     // Update generateEvaluation to use the returned answers directly
     const generateEvaluation = async (finalAnswer: string, question: string) => {
-        console.log("Generating evaluation");
+        console.log('Generating evaluation');
         setBotThinking(true);
 
         try {
             // Add system message about evaluation
             const tempMessageId = getUniqueMessageId();
-            setMessages(prev => [...prev, {
-                id: tempMessageId,
-                sender: 'system',
-                text: 'Bob is asking students for their final answers...',
-                timestamp: new Date().toISOString()
-            }]);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: tempMessageId,
+                    sender: 'system',
+                    text: 'Bob is asking students for their final answers...',
+                    timestamp: new Date().toISOString()
+                }
+            ]);
 
             // Get AI students' final answers and WAIT for them to complete
             // Now we directly get the answers from the function
             const { logicAnswer, patternAnswer } = await generateAIStudentFinalAnswers(question);
-            
-            console.log("Got final answers:", { logicAnswer, patternAnswer });
-            
+
+            console.log('Got final answers:', { logicAnswer, patternAnswer });
+
             // Update the system message
-            setMessages(prev => prev.map(msg => 
-                msg.id === tempMessageId
-                ? {
-                    ...msg,
-                    text: 'Bob is evaluating all the answers...',
-                    timestamp: new Date().toISOString()
-                }
-                : msg
-            ));
-            
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === tempMessageId
+                        ? {
+                              ...msg,
+                              text: 'Bob is evaluating all the answers...',
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
+
             // Once AI students have submitted answers, generate Bob's evaluation
             const bobMessageId = getUniqueMessageId();
-            setMessages(prev => [...prev, {
-                id: bobMessageId,
-                sender: "ai",
-                text: "...",
-                agentId: "bob",
-                timestamp: new Date().toISOString()
-            }]);
-            
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: bobMessageId,
+                    sender: 'ai',
+                    text: '...',
+                    agentId: 'bob',
+                    timestamp: new Date().toISOString()
+                }
+            ]);
+
             // Generate Bob's evaluation of all answers - using the answers we got directly
             const response = await aiService.generateResponse(
                 [
                     {
                         id: 1,
-                        sender: "user",
-                        text: `Problem: ${question}
+                        sender: 'user',
+                        text: `Problem: ${getQuestionText(question)}
                         
 Student's final answer: ${finalAnswer}
 
@@ -817,24 +911,26 @@ Format your response in a clear, encouraging way as a teacher would.`
             );
 
             // Remove the system message
-            setMessages(prev => prev.filter(msg => msg.id !== tempMessageId));
-            
+            setMessages((prev) => prev.filter((msg) => msg.id !== tempMessageId));
+
             // Update Bob's evaluation message
-            setMessages(prev => prev.map(msg =>
-                msg.id === bobMessageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === bobMessageId
+                        ? {
+                              ...msg,
+                              text: response,
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
 
             // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, bobMessageId]);
+            setTypingMessageIds((prev) => [...prev, bobMessageId]);
             setEvaluationComplete(true);
         } catch (error) {
-            console.error("Error generating evaluation:", error);
+            console.error('Error generating evaluation:', error);
             // Handle error
         } finally {
             setBotThinking(false);
@@ -851,30 +947,30 @@ Format your response in a clear, encouraging way as a teacher would.`
     const startNewRound = async () => {
         // Reset tracking of who spoke last
         setLastSpeakingBot(null);
-        
+
         // Wait for questions to load if they haven't yet
         if (!loadedQuestions) {
-            console.log("Waiting for questions to load...");
+            console.log('Waiting for questions to load...');
             setTimeout(startNewRound, 500);
             return;
         }
 
         // Check if we've used all questions and should go to the test screen
         if (usedQuestionIndices.length >= allQuestions.length) {
-            console.log("All questions used, redirecting to test screen");
-            router.push('/break');
+            console.log('All questions used, redirecting to test screen');
+            completeLesson();
             return;
         }
 
         // Reset state for new round
-        console.log("Starting new round");
+        console.log('Starting new round');
         setMessages([]);
         setCompletedMessageIds([]);
         setTypingMessageIds([]);
         setEvaluationComplete(false);
-        setScratchboardContent("");
-        setInput("");
-        setFinalAnswer("");
+        setScratchboardContent('');
+        setInput('');
+        setFinalAnswer('');
         setUserHasScrolled(false);
 
         try {
@@ -885,67 +981,68 @@ Format your response in a clear, encouraging way as a teacher would.`
             }
 
             setCurrentQuestionIndex(newIndex);
-            setUsedQuestionIndices(prev => [...prev, newIndex]);
+            setUsedQuestionIndices((prev) => [...prev, newIndex]);
 
             const selectedQuestion = allQuestions[newIndex];
             setCurrentQuestion(selectedQuestion);
 
             // Clear any pending interactions from previous round
             pendingBotInteractionsRef.current = [];
-            
+
             // Set up messages for the new round with Bob introducing the problem
             const bobIntroId = getUniqueMessageId();
-            
+
             // Create a message object with an onComplete callback
             const bobIntroMessage = {
                 id: bobIntroId,
-                    sender: "ai",
-                text: `Today we'll be working on an interesting problem. Take your time to understand it and think about your approach:\n\n${selectedQuestion}\n\nConsider what concepts might apply here. Feel free to ask questions as you work.`,
-                agentId: "bob",
+                sender: 'ai',
+                text: `Today we'll be working on an interesting problem. Take your time to understand it and think about your approach:\n\n${getQuestionText(selectedQuestion)}\n\nConsider what concepts might apply here. Feel free to ask questions as you work.`,
+                agentId: 'bob',
                 timestamp: new Date().toISOString(),
                 onComplete: () => {
                     console.log("Bob's intro completed, triggering Logic Bot");
+                    console.log("Current problem:", getQuestionText(selectedQuestion));
                     // When Bob's intro is done typing, trigger Logic Bot
                     setTimeout(() => {
-                        generateAIStudentComment("logic", selectedQuestion);
+                        generateAIStudentComment('logic', selectedQuestion);
                     }, 2000); // Short pause after typing completes
                 }
             };
-            
+
             setMessages([bobIntroMessage]);
-            setTypingMessageIds(prev => [...prev, bobIntroId]);
-            
+            setTypingMessageIds((prev) => [...prev, bobIntroId]);
+
             // Reset timer and other state
             setTimeLeft(120);
             setIsQuestioningEnabled(true);
             roundEndedRef.current = false;
 
             // After Bob introduces the problem, set him as the last speaker
-            setLastSpeakingBot("bob");
+            setLastSpeakingBot('bob');
 
             // Reset bot question counts
             setBotQuestionCounts({ logic: 0, pattern: 0 });
-
         } catch (error) {
-            console.error("Error starting new round:", error);
+            console.error('Error starting new round:', error);
 
             // Use a fallback question
-            const fallbackQuestion = "In how many ways can 5 distinct books be distributed to 3 distinct students such that each student gets at least one book?";
+            const fallbackQuestion =
+                'In how many ways can 5 distinct books be distributed to 3 distinct students such that each student gets at least one book?';
 
             setCurrentQuestion(fallbackQuestion);
 
             setMessages([
                 {
                     id: 1,
-                    sender: "ai",
-                    text: "There was an issue loading questions from the server, but I have a combinatorics problem for us to work on.",
-                    agentId: "logic"
+                    sender: 'ai',
+                    text: 'There was an issue loading questions from the server, but I have a combinatorics problem for us to work on.',
+                    agentId: 'logic'
                 },
                 {
                     id: 2,
-                    sender: "ai",
+                    sender: 'ai',
                     text: fallbackQuestion,
-                    agentId: "logic"
+                    agentId: 'logic'
                 }
             ]);
 
@@ -963,82 +1060,91 @@ Format your response in a clear, encouraging way as a teacher would.`
         }
     }, [loadedQuestions]);
 
-    // Handle next question button
+    // Update the handleNextQuestion function to directly complete the lesson
     const handleNextQuestion = () => {
-        setEvaluationComplete(false);
-        startNewRound();
+        console.log("Completing lesson directly");
+        completeLesson();
     };
 
     // Update generateAIStudentComment to fix the issue with Bob not responding
     const generateAIStudentComment = async (agentId: string, question: string) => {
         // Don't generate if student already asked enough questions
-        if ((agentId === 'logic' && botQuestionCounts.logic >= 1) || 
-            (agentId === 'pattern' && botQuestionCounts.pattern >= 1)) {
+        if (
+            (agentId === 'logic' && botQuestionCounts.logic >= 1) ||
+            (agentId === 'pattern' && botQuestionCounts.pattern >= 1)
+        ) {
             return;
         }
-        
-        const agent = agents.find(a => a.id === agentId);
+
+        const agent = agents.find((a) => a.id === agentId);
         if (!agent) return;
-        
+
         const messageId = getUniqueMessageId();
-        
+
         // Add typing indicator first
-        setMessages(prev => [...prev, {
-            id: messageId,
-            sender: "ai",
-            text: "...",
-            agentId: agentId,
-            timestamp: new Date().toISOString()
-        }]);
-        
+        setMessages((prev) => [
+            ...prev,
+            {
+                id: messageId,
+                sender: 'ai',
+                text: '...',
+                agentId: agentId,
+                timestamp: new Date().toISOString()
+            }
+        ]);
+
+        console.log(`Generating student comment with problem context: ${getQuestionText(question)}`);
+
         try {
             // Generate a brief question or comment about the problem
             const response = await aiService.generateResponse(
                 [
                     {
                         id: 1,
-                        sender: "user",
-                        text: `The teacher just presented this problem: ${question}\n\nAs a student, provide a brief question or observation about this problem. Keep it concise (1-3 sentences) and don't solve it. Ask something insightful or make an observation that shows you're thinking about the problem.`
+                        sender: 'user',
+                        text: `The teacher just presented this problem: ${getQuestionText(question)}\n\nAs a student, provide a brief question or observation about this problem. Keep it concise (1-3 sentences) and don't solve it. Ask something insightful or make an observation that shows you're thinking about the problem.`
                     }
                 ],
                 {
-                    systemPrompt: agent.systemPrompt + "\nKeep your response under 3 sentences. Be very concise.",
+                    systemPrompt: agent.systemPrompt + '\nKeep your response under 3 sentences. Be very concise.',
                     model: currentModel
                 }
             );
-            
+
             // Store the response for later use
             const studentResponseText = response;
-            
+
             // Update message with response and add onComplete callback
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: studentResponseText,
-                        timestamp: new Date().toISOString(),
-                        onComplete: () => {
-                            console.log(`${agentId}'s comment completed, triggering teacher response`);
-                            // When student's message is done typing, trigger Bob's response
-                            setTimeout(() => {
-                                generateTeacherResponse(question, studentResponseText, agentId);
-                            }, 2000); // Short pause after typing completes
-                        }
-                    }
-                    : msg
-            ));
-            
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === messageId
+                        ? {
+                              ...msg,
+                              text: studentResponseText,
+                              timestamp: new Date().toISOString(),
+                              onComplete: () => {
+                                  console.log(`${agentId}'s comment completed, triggering teacher response`);
+                                  // When student's message is done typing, trigger Bob's response
+                                  setTimeout(() => {
+                                      generateTeacherResponse(question, studentResponseText, agentId);
+                                  }, 2000); // Short pause after typing completes
+                              }
+                          }
+                        : msg
+                )
+            );
+
             // Add to typing state AFTER setting the text
-            setTypingMessageIds(prev => [...prev, messageId]);
+            setTypingMessageIds((prev) => [...prev, messageId]);
 
             // Update question count after generating response
             if (agentId === 'logic') {
-                setBotQuestionCounts(prev => ({ ...prev, logic: prev.logic + 1 }));
+                setBotQuestionCounts((prev) => ({ ...prev, logic: prev.logic + 1 }));
             } else if (agentId === 'pattern') {
-                setBotQuestionCounts(prev => ({ ...prev, pattern: prev.pattern + 1 }));
+                setBotQuestionCounts((prev) => ({ ...prev, pattern: prev.pattern + 1 }));
             }
         } catch (error) {
-            console.error("Error generating student comment:", error);
+            console.error('Error generating student comment:', error);
             // Handle error
         }
     };
@@ -1047,15 +1153,15 @@ Format your response in a clear, encouraging way as a teacher would.`
     const generateTeacherResponse = async (question: string, studentMessage: string, studentId: string) => {
         // Don't generate if round ended
         if (roundEndedRef.current) return;
-        
+
         const messageId = getUniqueMessageId();
-        
+
         // Add typing indicator with onComplete callback
         const teacherMessage = {
             id: messageId,
-            sender: "ai",
-            text: "...",
-            agentId: "bob",
+            sender: 'ai',
+            text: '...',
+            agentId: 'bob',
             timestamp: new Date().toISOString(),
             onComplete: () => {
                 console.log("Bob's response completed, maybe triggering next student");
@@ -1064,49 +1170,53 @@ Format your response in a clear, encouraging way as a teacher would.`
                     // Only continue the conversation 70% of the time
                     if (Math.random() < 0.7 && !roundEndedRef.current) {
                         // Choose the other student to respond
-                        const otherStudentId = studentId === "logic" ? "pattern" : "logic";
+                        const otherStudentId = studentId === 'logic' ? 'pattern' : 'logic';
                         // Generate a follow-up comment from the other student
                         generateAIStudentComment(otherStudentId, question);
                     }
                 }, 2000); // Short pause after typing completes
             }
         };
-        
-        setMessages(prev => [...prev, teacherMessage]);
-        
+
+        setMessages((prev) => [...prev, teacherMessage]);
+
+        console.log(`Generating teacher response with problem context: ${getQuestionText(question)}`);
+
         try {
-            const studentName = agents.find(a => a.id === studentId)?.name || studentId;
-            
+            const studentName = agents.find((a) => a.id === studentId)?.name || studentId;
+
             // Generate Bob's response to the student
             const response = await aiService.generateResponse(
                 [
                     {
                         id: 1,
-                        sender: "user",
-                        text: `Problem: ${question}\n\n${studentName} asked/commented: "${studentMessage}"\n\nAs the teacher, provide a thoughtful but brief response that guides without giving away the solution. Acknowledge good insights or gently redirect if needed.`
+                        sender: 'user',
+                        text: `Problem: ${getQuestionText(question)}\n\n${studentName} asked/commented: "${studentMessage}"\n\nAs the teacher, provide a thoughtful but brief response that guides without giving away the solution. Acknowledge good insights or gently redirect if needed.`
                     }
                 ],
                 {
-                    systemPrompt: agents.find(a => a.id === "bob")?.systemPrompt,
+                    systemPrompt: agents.find((a) => a.id === 'bob')?.systemPrompt,
                     model: currentModel
                 }
             );
-            
+
             // Update message with response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-            
+            setMessages((prev) =>
+                prev.map((msg) =>
+                    msg.id === messageId
+                        ? {
+                              ...msg,
+                              text: response,
+                              timestamp: new Date().toISOString()
+                          }
+                        : msg
+                )
+            );
+
             // Add to typing state AFTER setting the text
-            setTypingMessageIds(prev => [...prev, messageId]);
+            setTypingMessageIds((prev) => [...prev, messageId]);
         } catch (error) {
-            console.error("Error generating teacher response:", error);
+            console.error('Error generating teacher response:', error);
             // Handle error
         }
     };
@@ -1120,21 +1230,13 @@ Format your response in a clear, encouraging way as a teacher would.`
                     <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
                         <div className="flex justify-between items-start mb-2">
                             <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                            {/* Timer integrated in problem statement */}
-                            <div className={`p-2 rounded-lg ${timeLeft > 20
-                                ? 'bg-green-700'
-                                : timeLeft > 10
-                                    ? 'bg-yellow-600 animate-pulse'
-                                    : 'bg-red-700 animate-pulse'} ml-4`}>
-                                <div className="text-xl font-mono text-white">{formatTime(timeLeft)}</div>
-                                {timeLeft <= 20 && (
-                                    <div className="text-xs text-white text-center">
-                                        {timeLeft <= 10 ? "Time almost up!" : "Finish soon!"}
-                                    </div>
-                                )}
+                            <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                                Time: {formatTime(timeLeft)}
                             </div>
                         </div>
-                        <p className="text-white text-lg">{currentQuestion}</p>
+                        <p className="text-white text-lg">
+                            {getQuestionText(currentQuestion)}
+                        </p>
                     </div>
                 )}
 
@@ -1151,11 +1253,16 @@ Format your response in a clear, encouraging way as a teacher would.`
                         />
                         <button
                             onClick={() => handleSend()}
-                            disabled={!finalAnswer.trim() || !scratchboardContent.trim() || typingMessageIds.length > 0}
-                            className={`px-4 py-3 rounded-md text-lg font-medium ${finalAnswer.trim() && scratchboardContent.trim() && typingMessageIds.length === 0
-                                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                }`}
+                            disabled={
+                                !finalAnswer.trim() || !scratchboardContent.trim() || typingMessageIds.length > 0
+                            }
+                            className={`px-4 py-3 rounded-md text-lg font-medium ${
+                                finalAnswer.trim() &&
+                                scratchboardContent.trim() &&
+                                typingMessageIds.length === 0
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                            }`}
                         >
                             Submit Final Answer
                         </button>
@@ -1182,7 +1289,7 @@ Format your response in a clear, encouraging way as a teacher would.`
                     {/* Agent info for group/multi modes */}
                     <div className="bg-black bg-opacity-30 p-2">
                         <div className="flex space-x-3">
-                            {agents.map(agent => (
+                            {agents.map((agent) => (
                                 <div key={agent.id} className="flex items-center">
                                     <Image
                                         src={agent.avatar}
@@ -1198,19 +1305,28 @@ Format your response in a clear, encouraging way as a teacher would.`
                     </div>
 
                     {/* Chat messages - Scrollable */}
-                    <div className="flex-1 p-4 overflow-y-auto"
+                    <div
+                        className="flex-1 p-4 overflow-y-auto"
                         ref={chatContainerRef}
-                        onScroll={handleScroll}>
+                        onScroll={handleScroll}
+                    >
                         {messages.map((msg) => (
                             <div
                                 key={msg.id}
-                                className={`mb-4 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                                className={`mb-4 flex ${
+                                    msg.sender === 'user' ? 'justify-end' : 'justify-start'
+                                }`}
                             >
                                 {msg.sender === 'ai' && (
                                     <div className="mr-2 flex-shrink-0">
                                         <Image
-                                            src={agents.find(a => a.id === msg.agentId)?.avatar || '/logic_avatar.png'}
-                                            alt={agents.find(a => a.id === msg.agentId)?.name || 'AI'}
+                                            src={
+                                                agents.find((a) => a.id === msg.agentId)?.avatar ||
+                                                '/logic_avatar.png'
+                                            }
+                                            alt={
+                                                agents.find((a) => a.id === msg.agentId)?.name || 'AI'
+                                            }
                                             width={40}
                                             height={40}
                                             className="rounded-full border-2 border-white"
@@ -1219,57 +1335,50 @@ Format your response in a clear, encouraging way as a teacher would.`
                                 )}
 
                                 <div
-                                    className={`max-w-[75%] rounded-lg p-3 ${msg.sender === 'user'
-                                        ? 'bg-blue-600 text-white'
-                                        : msg.sender === 'system'
+                                    className={`max-w-[75%] rounded-lg p-3 ${
+                                        msg.sender === 'user'
+                                            ? 'bg-blue-600 text-white'
+                                            : msg.sender === 'system'
                                             ? 'bg-purple-700 text-white'
                                             : 'bg-white bg-opacity-10 text-white'
-                                        }`}
+                                    }`}
                                 >
                                     {msg.sender === 'ai' && (
                                         <div className="text-sm text-gray-300 mb-1 font-bold">
-                                            {agents.find(a => a.id === msg.agentId)?.name || 'AI'}
+                                            {agents.find((a) => a.id === msg.agentId)?.name || 'AI'}
                                         </div>
                                     )}
-
-                                    {msg.sender === 'system' && (
-                                        <div className="text-sm text-gray-300 mb-1 font-bold">
-                                            Official Solution
-                                        </div>
-                                    )}
-
+                                    
+                                    {/* Add the message content rendering logic here */}
                                     {typingMessageIds.includes(msg.id) ? (
                                         <TypewriterTextWrapper
                                             key={`typewriter-${msg.id}`}
-                                            text={msg.text}
+                                            text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
                                             speed={20}
                                             messageId={msg.id}
-                                            onTypingProgress={(progress) => {
+                                            onTypingProgress={() => {
                                                 if (!userHasScrolled) {
                                                     scrollToBottom();
                                                 }
                                             }}
                                             onTypingComplete={() => {
-                                                console.log(`Message ${msg.id} completed typing`);
-
-                                                setTimeout(() => {
-                                                    if (typingMessageIds.includes(msg.id)) {
-                                                        setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
-                                                        setCompletedMessageIds(prev => [...prev, msg.id]);
-
-                                                        if (msg.onComplete) {
-                                                            msg.onComplete();
-                                                        }
-
-                                                        if (!userHasScrolled) {
-                                                            scrollToBottom();
-                                                        }
-                                                    }
-                                                }, 100);
+                                                // Typing effect complete handling
+                                                setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
+                                                setCompletedMessageIds(prev => [...prev, msg.id]);
+                                                
+                                                if (msg.onComplete) {
+                                                    msg.onComplete();
+                                                }
+                                                
+                                                if (!userHasScrolled) {
+                                                    scrollToBottom();
+                                                }
                                             }}
                                         />
                                     ) : (
-                                        <div className="whitespace-pre-wrap">{msg.text}</div>
+                                        <div className="whitespace-pre-wrap">
+                                            {typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -1297,10 +1406,11 @@ Format your response in a clear, encouraging way as a teacher would.`
                                 <button
                                     onClick={handleUserQuestion}
                                     disabled={!input.trim() || typingMessageIds.length > 0}
-                                    className={`px-4 py-2 rounded-md ${input.trim() && typingMessageIds.length === 0
-                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                        }`}
+                                    className={`px-4 py-2 rounded-md ${
+                                        input.trim() && typingMessageIds.length === 0
+                                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                    }`}
                                 >
                                     Ask
                                 </button>
@@ -1312,10 +1422,10 @@ Format your response in a clear, encouraging way as a teacher would.`
                     {!isQuestioningEnabled && evaluationComplete && (
                         <div className="p-3 bg-black bg-opacity-30 flex justify-center">
                             <button
-                                onClick={handleNextQuestion}
+                                onClick={completeLesson} // Directly call completeLesson instead of handleNextQuestion 
                                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md"
                             >
-                                Next Question
+                                Proceed
                             </button>
                         </div>
                     )}

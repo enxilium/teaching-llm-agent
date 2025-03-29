@@ -1,19 +1,32 @@
 'use client'
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useFlow } from '@/context/FlowContext';
 import Tetris from '@/components/Tetris';
 
 export default function BreakPage() {
-    const [timeLeft, setTimeLeft] = useState(2 * 60); // 5 minutes
-    const router = useRouter();
+    const [timeLeft, setTimeLeft] = useState(5); // 5 minutes
+    const { completeTetrisBreak, currentStage } = useFlow();
+
+    // Ensure user is in the proper flow stage
+    useEffect(() => {
+        // Wrap the localStorage update in a setTimeout to move it out of the render cycle
+        if (currentStage !== 'tetris-break') {
+            console.warn(`Warning: User accessed break page in incorrect stage: ${currentStage}`);
+            
+            // Use setTimeout to defer the update to avoid updating during render
+            setTimeout(() => {
+                localStorage.setItem('currentStage', 'tetris-break');
+            }, 0);
+        }
+    }, [currentStage]);
 
     useEffect(() => {
         const timer = setInterval(() => {
             setTimeLeft(prev => {
                 if (prev <= 1) {
                     clearInterval(timer);
-                    router.push('/test');
+                    completeTetrisBreak(); // Use Flow context to advance
                     return 0;
                 }
                 return prev - 1;
@@ -21,7 +34,7 @@ export default function BreakPage() {
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [router]);
+    }, [completeTetrisBreak]);
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);

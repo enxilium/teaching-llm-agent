@@ -1,7 +1,12 @@
 {
-    "combinatorics":[
-        "In how many ways can four couples be seated at a round table if the men and women want to sit alternately?",
-        "In how many different ways can five people be seated at a circular table?",
-        "A shopping mall has a straight row of 5 flagpoles at its main entrance plaza. It has 3 identical green flags and 2 identical yellow flags. How many distinct arrangements of flags on the flagpoles are possible?"
+    "questions": [
+        {
+            "question": "If 2 = p^3, then 8p must equal what?",
+            "answer": "p^10"
+        },
+        {
+            "question": "If a^(3/4) = 64, then √a must equal what?",
+            "answer": "4"
+        }
     ]
 }

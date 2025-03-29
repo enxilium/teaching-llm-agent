@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { AI_MODELS } from '@/services/AI';
 
 // Don't expose API key on the client side - use server-side only
-const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
+const ANTHROPIC_API_KEY = process.env.CLAUDE_API_KEY;
 
 export async function POST(request: Request) {
     try {
