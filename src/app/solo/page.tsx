@@ -131,7 +131,7 @@ export default function SoloPage() {
 
                     {/* Working Space - REQUIRED */}
                     <div className="mb-6">
-                        <label className="block text-white text-sm mb-2 flex items-center">
+                        <label className="block text-white text-sm mb-2 items-center">
                             <span className="mr-2">Show your work (required):</span>
                             {errors.work && 
                                 <span className="text-red-400 text-xs">* You must show your work before submitting</span>
@@ -155,7 +155,7 @@ export default function SoloPage() {
 
                     {/* Final Answer Box */}
                     <div className="mb-6">
-                        <label className="block text-white text-sm mb-2 flex items-center">
+                        <label className="block text-white text-sm mb-2 items-center">
                             <span className="mr-2">Your final answer (required):</span>
                             {errors.answer && 
                                 <span className="text-red-400 text-xs">* You must provide an answer</span>

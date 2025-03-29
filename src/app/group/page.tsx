@@ -9,6 +9,22 @@ import { Message } from '@/utils/types';
 import TypewriterTextWrapper from "@/components/TypewriterTextWrapper";
 import { useFlow } from '@/context/FlowContext';
 
+// Add these interfaces at the top of your file
+interface Question {
+  id?: string | number;
+  question?: string;
+  answer?: string;
+  correctAnswer?: string;
+  options?: Record<string, string>;
+  [key: string]: any; // For any other properties
+}
+
+interface AIResponse {
+  text?: string;
+  content?: string;
+  [key: string]: any; // For any other unexpected properties
+}
+
 export default function PeerOnlyPage() {
     const router = useRouter();
     const { currentStage, completeLesson } = useFlow();
@@ -30,7 +46,7 @@ export default function PeerOnlyPage() {
     const [lastUserActivityTime, setLastUserActivityTime] = useState(Date.now());
 
     // Questions from JSON
-    const [allQuestions, setAllQuestions] = useState<string[]>([]);
+    const [allQuestions, setAllQuestions] = useState<Question[]>([]);
     const [loadedQuestions, setLoadedQuestions] = useState(false);
 
     // Timer state
@@ -40,7 +56,7 @@ export default function PeerOnlyPage() {
     // Question tracking
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [usedQuestionIndices, setUsedQuestionIndices] = useState<number[]>([]);
-    const [currentQuestion, setCurrentQuestion] = useState<any>(null);
+    const [currentQuestion, setCurrentQuestion] = useState<string | Question>("");
 
     // Define the AI agents - only Logic Bot and Pattern Bot
     const agents = [
@@ -68,6 +84,12 @@ Your goal is to help peers see the problem from different angles and recognize e
         }
     ];
 
+    const getQuestionText = (question: any): string => {
+        if (typeof question === 'string') return question;
+        if (question && typeof question === 'object' && question.question) return question.question;
+        return JSON.stringify(question);
+    };
+
     // Load questions from JSON file
     useEffect(() => {
         const fetchQuestions = async () => {
@@ -80,7 +102,7 @@ Your goal is to help peers see the problem from different angles and recognize e
                 const data = await response.json();
                 
                 // Flatten all categories into a single array of questions
-                const questions: string[] = Object.values(data).flat() as string[];
+                const questions: Question[] = Object.values(data).flat() as Question[];
                 
                 setAllQuestions(questions);
                 setLoadedQuestions(true);
@@ -89,9 +111,21 @@ Your goal is to help peers see the problem from different angles and recognize e
                 console.error("Error loading questions:", error);
                 // Use fallback questions if we can't load from JSON
                 setAllQuestions([
-                    "In how many ways can four couples be seated at a round table if the men and women want to sit alternately?",
-                    "In how many different ways can five people be seated at a circular table?",
-                    "A shopping mall has a straight row of 5 flagpoles at its main entrance plaza. It has 3 identical green flags and 2 identical yellow flags. How many distinct arrangements of flags on the flagpoles are possible?"
+                    {
+                        id: 1,
+                        question: "In how many ways can four couples be seated at a round table if the men and women want to sit alternately?",
+                        answer: "144"
+                    },
+                    {
+                        id: 2,
+                        question: "In how many different ways can five people be seated at a circular table?",
+                        answer: "24"
+                    },
+                    {
+                        id: 3,
+                        question: "A shopping mall has a straight row of 5 flagpoles at its main entrance plaza. It has 3 identical green flags and 2 identical yellow flags. How many distinct arrangements of flags on the flagpoles are possible?",
+                        answer: "10"
+                    }
                 ]);
                 setLoadedQuestions(true);
             }
@@ -118,6 +152,8 @@ Your goal is to help peers see the problem from different angles and recognize e
 
     // Add this at the top of your component with other state declarations
     const nextMessageIdRef = useRef(3); // Start at 3 to match your initial state
+    const botInteractionCountRef = useRef(0);
+    const maxBotInteractions = 2; // Limit automatic interactions
 
     // Replace your existing getUniqueMessageId function with this:
     const getUniqueMessageId = () => {
@@ -332,8 +368,7 @@ Your goal is to help peers see the problem from different angles and recognize e
         }
     };
 
-    // Update the generateBotFinalAnswers function to use callbacks for sequencing
-    const generateBotFinalAnswers = (question: string) => {
+    const generateBotFinalAnswers = (question: string | Question) => {
         console.log("Generating bot final answers");
         
         // Generate Logic Bot's answer first
@@ -383,7 +418,7 @@ Your goal is to help peers see the problem from different angles and recognize e
 
     // Update the generateSingleBotAnswer function to properly handle different response types
     // and ensure it has the full problem context
-    const generateSingleBotAnswer = async (messageId: number, agent: any, question: string) => {
+    const generateSingleBotAnswer = async (messageId: number, agent: any, question: string | Question) => {
         try {
             // Format the question text properly
             const questionText = typeof question === 'string' 
@@ -395,7 +430,7 @@ Your goal is to help peers see the problem from different angles and recognize e
             console.log(`Generating ${agent.name}'s final answer for question: ${questionText}`);
             
             // Generate bot's final answer with explicit problem context
-            const response = await aiService.generateResponse(
+            const response: string | AIResponse = await aiService.generateResponse(
                 [
                     { 
                         id: 1, 
@@ -421,11 +456,14 @@ Make sure to clearly state the numerical or final result of your calculation.`
             if (typeof response === 'string') {
                 stringResponse = response;
             } else if (response && typeof response === 'object') {
+                // Use type assertion to help TypeScript understand this is an AIResponse
+                const responseObj = response as AIResponse;
+                
                 // Check if the object has a text property
-                if (typeof response.text === 'string') {
-                    stringResponse = response.text;
-                } else if (typeof response.content === 'string') {
-                    stringResponse = response.content;
+                if (typeof responseObj.text === 'string') {
+                    stringResponse = responseObj.text;
+                } else if (typeof responseObj.content === 'string') {
+                    stringResponse = responseObj.content;
                 } else {
                     // Last resort - try to stringify the object but with a clear message
                     try {
@@ -483,7 +521,7 @@ Make sure to clearly state the numerical or final result of your calculation.`
     };
 
     // Completely replace the generateOfficialSolution function to use the answer from questions.json
-    const generateOfficialSolution = async (question: string) => {
+    const generateOfficialSolution = async (question: string | Question) => {
         console.log("Generating official solution");
         
         // Add system message about the official solution
@@ -522,8 +560,10 @@ Make sure to clearly state the numerical or final result of your calculation.`
             
             // First check if currentQuestion has an answer property
             if (typeof currentQuestion === 'object' && currentQuestion !== null) {
-                if (currentQuestion.answer) {
-                    officialAnswer = currentQuestion.answer;
+                // Use as to tell TypeScript this is a Question type with answer property
+                const questionObj = currentQuestion as Question;
+                if (questionObj.answer) {
+                    officialAnswer = questionObj.answer;
                     console.log("Found answer in current question object:", officialAnswer);
                 }
             }
@@ -636,11 +676,145 @@ Make sure to clearly state the numerical or final result of your calculation.`
         forceScrollToBottomRef.current = true;
         setTimeout(() => scrollToBottom(true), 50);
 
+        // Reset bot interaction counter when user asks something
+        botInteractionCountRef.current = 0;
+
         // Check if a specific bot was mentioned
         const mentionedBot = checkForBotMention(userMessage.text || "");
         
         // Generate AI responses based on which bot was mentioned
         generateAIResponse(userMessage.text || "", mentionedBot);
+    };
+
+    // Add this function after handleUserQuestion
+    const triggerBotInteraction = async (currentResponder: string) => {
+        // Check if we've reached the maximum number of automatic interactions
+        if (botInteractionCountRef.current >= maxBotInteractions) {
+            console.log("Maximum bot interactions reached, waiting for user input");
+            return;
+        }
+
+        // Increment the interaction counter
+        botInteractionCountRef.current += 1;
+
+        if (roundEndedRef.current || typingMessageIds.length > 0 || !isQuestioningEnabled) {
+            return; // Don't trigger new interactions if round ended or typing in progress
+        }
+
+        // Determine which bot should respond next (the opposite one)
+        const nextResponder = currentResponder === 'logic' ? 'pattern' : 'logic';
+        const nextAgent = agents.find(a => a.id === nextResponder);
+        const currentAgent = agents.find(a => a.id === currentResponder);
+        
+        if (!nextAgent || !currentAgent) return;
+        
+        // Get the last few messages for context (up to 5)
+        const recentMessages = messages.slice(-5);
+        
+        // Only proceed if the most recent message is from a bot (not the user)
+        const lastMessage = messages[messages.length - 1];
+        if (!lastMessage || lastMessage.sender !== 'ai') return;
+        
+        console.log(`Triggering ${nextAgent.name} to respond to ${currentAgent.name}`);
+        
+        // Add small delay to make the interaction feel natural
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Skip if conditions have changed during the delay
+        if (roundEndedRef.current || typingMessageIds.length > 0 || !isQuestioningEnabled) {
+            return;
+        }
+        
+        // Format the question text properly
+        const questionText = typeof currentQuestion === 'string' 
+            ? currentQuestion 
+            : currentQuestion?.question 
+                ? currentQuestion.question 
+                : JSON.stringify(currentQuestion);
+
+        try {
+            // Show typing indicator
+            const tempMessageId = getUniqueMessageId();
+            setMessages(prev => [...prev, {
+                id: tempMessageId,
+                sender: 'ai',
+                text: '...',
+                agentId: nextResponder,
+                timestamp: new Date().toISOString()
+            }]);
+
+            // Generate context-aware response
+            const messagesForAI = [
+                { 
+                    id: 1, 
+                    sender: 'user', 
+                    text: `The problem we're working on is: ${questionText}` 
+                }
+            ];
+            
+            // Add recent conversation context
+            recentMessages.forEach((msg, index) => {
+                messagesForAI.push({
+                    id: index + 2,
+                    sender: msg.sender === 'ai' ? 'assistant' : 'user',
+                    text: msg.sender === 'ai' 
+                        ? `${agents.find(a => a.id === msg.agentId)?.name || 'AI'}: ${msg.text}` 
+                        : `Student: ${msg.text}`
+                });
+            });
+            
+            // Add instruction for the bot to respond to the conversation
+            messagesForAI.push({
+                id: messagesForAI.length + 1,
+                sender: 'user',
+                text: `As ${nextAgent.name}, continue this conversation. Add your perspective on the problem or ask a question about the approach. 
+                Be helpful and conversational, like a classmate trying to solve the problem together. 
+                Don't just repeat what's been said, but add new insights or ask clarifying questions.`
+            });
+
+            const response = await aiService.generateResponse(
+                messagesForAI,
+                {
+                    systemPrompt: nextAgent.systemPrompt,
+                    model: currentModel
+                }
+            );
+
+            // Handle different response types
+            let stringResponse;
+            if (typeof response === 'string') {
+                stringResponse = response;
+            } else if (response && typeof response === 'object') {
+                const responseObj = response as AIResponse;
+                stringResponse = responseObj.text || responseObj.content || "I have some thoughts about this approach.";
+            } else {
+                stringResponse = "I'm thinking about this problem from a different angle.";
+            }
+
+            // Replace typing indicator with actual message
+            setMessages(prev => prev.map(msg =>
+                msg.id === tempMessageId
+                    ? {
+                        ...msg,
+                        text: stringResponse,
+                        timestamp: new Date().toISOString(),
+                        onComplete: () => {
+                            // Schedule the other bot to respond if time permits
+                            setTimeout(() => {
+                                if (!roundEndedRef.current && isQuestioningEnabled) {
+                                    triggerBotInteraction(nextResponder);
+                                }
+                            }, 10000 + Math.random() * 10000); // Longer delay: 10-20 seconds
+                        }
+                    }
+                    : msg
+            ));
+
+            // Add to typing state
+            setTypingMessageIds(prev => [...prev, tempMessageId]);
+        } catch (error) {
+            console.error("Error generating bot interaction:", error);
+        }
     };
 
     // Update the AI response generation to properly handle the problem context
@@ -687,7 +861,7 @@ Make sure to clearly state the numerical or final result of your calculation.`
             }]);
 
             // Generate AI response with proper problem context
-            const response = await aiService.generateResponse(
+            const response: string | AIResponse = await aiService.generateResponse(
                 [
                     { 
                         id: 1, 
@@ -711,17 +885,20 @@ Make sure to clearly state the numerical or final result of your calculation.`
             if (typeof response === 'string') {
                 stringResponse = response;
             } else if (response && typeof response === 'object') {
+                // Use type assertion to help TypeScript understand this is an AIResponse
+                const responseObj = response as AIResponse;
+                
                 // Check if the object has a text property
-                if (typeof response.text === 'string') {
-                    stringResponse = response.text;
-                } else if (typeof response.content === 'string') {
-                    stringResponse = response.content;
+                if (typeof responseObj.text === 'string') {
+                    stringResponse = responseObj.text;
+                } else if (typeof responseObj.content === 'string') {
+                    stringResponse = responseObj.content;
                 } else {
                     // Last resort - stringify
                     try {
                         stringResponse = JSON.stringify(response);
                         if (stringResponse === '{}' || stringResponse === '[object Object]') {
-                            stringResponse = `I need to think about this problem more carefully.`;
+                            stringResponse = `I have some thoughts about this problem.`;
                         }
                     } catch (e) {
                         stringResponse = `Let's analyze this step by step.`;
@@ -737,7 +914,15 @@ Make sure to clearly state the numerical or final result of your calculation.`
                     ? {
                         ...msg,
                         text: stringResponse,
-                        timestamp: new Date().toISOString()
+                        timestamp: new Date().toISOString(),
+                        onComplete: () => {
+                            // Trigger the other bot to respond
+                            setTimeout(() => {
+                                if (!roundEndedRef.current && isQuestioningEnabled) {
+                                    triggerBotInteraction(selectedAgent.id);
+                                }
+                            }, 1000);
+                        }
                     }
                     : msg
             ));
@@ -753,78 +938,7 @@ Make sure to clearly state the numerical or final result of your calculation.`
         }
     };
 
-    // Follow-up response generation
-    const generateFollowUpResponse = async (agent: any, userMessage: string, firstAgentResponse: string) => {
-        // Don't generate responses if time's up
-        if (roundEndedRef.current) return;
-
-        console.log(`Generating follow-up from ${agent.name}`);
-        setBotThinking(true);
-
-        try {
-            // Show typing indicator temporarily
-            const tempMessageId = getUniqueMessageId();
-            setMessages(prev => [...prev, {
-                id: tempMessageId,
-                sender: 'ai',
-                text: '...',
-                agentId: agent.id,
-                timestamp: new Date().toISOString()
-            }]);
-
-            // Generate AI response using the correct API call
-            const response = await aiService.generateResponse(
-                [
-                    { 
-                        id: 1, 
-                        sender: 'user', 
-                        text: `The current problem is: ${currentQuestion}` 
-                    },
-                    { 
-                        id: 2, 
-                        sender: 'user', 
-                        text: `The student asked: ${userMessage}` 
-                    },
-                    { 
-                        id: 3, 
-                        sender: 'user', 
-                        text: `The other AI student responded: ${firstAgentResponse}` 
-                    },
-                    { 
-                        id: 4, 
-                        sender: 'user', 
-                        text: 'Provide your perspective on this problem, possibly building on what the other student said or offering an alternative approach. Keep it conversational and helpful.' 
-                    }
-                ],
-                {
-                    systemPrompt: agent.systemPrompt,
-                    model: currentModel
-                }
-            );
-
-            // Replace typing indicator with actual message
-            setMessages(prev => prev.map(msg =>
-                msg.id === tempMessageId
-                    ? {
-                            ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Add to typing state
-            setTypingMessageIds(prev => [...prev, tempMessageId]);
-
-        } catch (error) {
-            console.error("Error generating follow-up response:", error);
-            setMessages(prev => prev.filter(msg => msg.text !== '...'));
-        } finally {
-            setBotThinking(false);
-        }
-    };
-
-    // Start new round or go to test screen if all questions used
+    // Update startNewRound to initiate bot interaction after problem presentation
     const startNewRound = async () => {
         // Wait for questions to load if they haven't yet
         if (!loadedQuestions) {
@@ -851,6 +965,9 @@ Make sure to clearly state the numerical or final result of your calculation.`
         setFinalAnswer("");
         setUserHasScrolled(false);
 
+        // Reset bot interaction counter
+        botInteractionCountRef.current = 0;
+
         try {
             // Find an unused question
             let newIndex = currentQuestionIndex;
@@ -873,13 +990,24 @@ Make sure to clearly state the numerical or final result of your calculation.`
                     id: messageId1,
                     sender: "ai",
                     text: "Let's work on this new problem together. I'll help you understand the concepts.",
-                    agentId: "logic"
+                    agentId: "logic",
+                    onComplete: () => {
+                        // Don't trigger yet, let second message complete first
+                    }
                 },
                 {
                     id: messageId2,
                     sender: "ai",
                     text: "I'm excited to explore different approaches to this problem. Let me know if you want to discuss patterns or visualizations.",
-                    agentId: "pattern"
+                    agentId: "pattern",
+                    onComplete: () => {
+                        // Both intro messages are now complete, start automatic interaction
+                        setTimeout(() => {
+                            if (!roundEndedRef.current && isQuestioningEnabled) {
+                                triggerBotInteraction('pattern'); // Start with Logic Bot responding to Pattern Bot
+                            }
+                        }, 2000);
+                    }
                 }
             ]);
 
@@ -926,12 +1054,6 @@ Make sure to clearly state the numerical or final result of your calculation.`
         startNewRound();
         }
     }, [loadedQuestions]);
-
-    // Update the handleNextQuestion function to call completeLesson directly
-    const handleNextQuestion = () => {
-        console.log("Completing lesson directly");
-        completeLesson();
-    };
 
     return (
         <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden">
