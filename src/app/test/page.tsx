@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useFlow } from '@/context/FlowContext';
 import ReactMarkdown from 'react-markdown';
@@ -13,7 +13,8 @@ interface TestQuestion {
     correctAnswer?: string;
 }
 
-export default function TestPage() {
+// Create a component to safely use search params
+function TestContent() {
     const searchParams = useSearchParams();
     const testStage = searchParams.get('stage') || 'pre'; // Default to pre-test
     
@@ -401,5 +402,18 @@ export default function TestPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+// Main component with Suspense
+export default function TestPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex flex-col h-screen justify-center items-center bg-gray-900 text-white">
+                <div className="text-2xl">Loading test...</div>
+            </div>
+        }>
+            <TestContent />
+        </Suspense>
     );
 }
