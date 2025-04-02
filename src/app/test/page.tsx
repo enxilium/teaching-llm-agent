@@ -4,6 +4,9 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useFlow } from '@/context/FlowContext';
 import ReactMarkdown from 'react-markdown';
+// Add KaTeX for math formatting
+import 'katex/dist/katex.min.css';
+import { InlineMath, BlockMath } from 'react-katex';
 
 // Define test questions structure
 interface TestQuestion {
@@ -12,6 +15,24 @@ interface TestQuestion {
     options?: Record<string, string>;
     correctAnswer?: string;
 }
+
+// Helper function to process text with math expressions - simplified version
+const formatMathExpression = (text: string) => {
+    if (!text) return text;
+    
+    // Handle explicit math delimiters
+    if (text.includes('$')) {
+        return text.split(/(\$.*?\$)/).map((part, index) => {
+            if (part.startsWith('$') && part.endsWith('$')) {
+                const mathExpression = part.slice(1, -1);
+                return <InlineMath key={index} math={mathExpression} />;
+            }
+            return part;
+        });
+    }
+    
+    return text;
+};
 
 // Create a component to safely use search params
 function TestContent() {
@@ -151,15 +172,6 @@ function TestContent() {
                 setIsLoading(false);
             } catch (error) {
                 console.error("Error loading questions:", error);
-                // Fallback with simpler initialization
-                setAllQuestions([
-                    {
-                        id: 1,
-                        question: "If you have 8 distinct objects, in how many ways can you arrange 3 of them in a row?",
-                        correctAnswer: "336"
-                    }
-                ]);
-                setIsLoading(false);
             }
             
             // Reset current index and ensure proper initialization
@@ -212,12 +224,6 @@ function TestContent() {
 
     // Submit answer
     const handleSubmitAnswer = () => {
-        // Check if working space is filled
-        if (!workingSpace[currentQuestion?.id || 0] || workingSpace[currentQuestion?.id || 0].trim() === '') {
-            alert("Please show your work in the working space before submitting your answer.");
-            return;
-        }
-
         if (roundEndedRef.current || !currentAnswer) return;
         roundEndedRef.current = true;
 
@@ -325,25 +331,8 @@ function TestContent() {
                     {/* Question Content */}
                     <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
                         <h2 className="text-xl text-white font-bold mb-4">
-                            {currentQuestion?.question || "Loading question..."}
+                            {formatMathExpression(currentQuestion?.question || "Loading question...")}
                         </h2>
-
-                        {/* Working Space */}
-                        <div className="mb-6">
-                            <label className="block text-white text-sm mb-2">
-                                Show your work (required):
-                            </label>
-                            <textarea
-                                ref={workingSpaceRef}
-                                value={workingSpace[currentQuestion?.id || 0] || ""}
-                                onChange={(e) => setWorkingSpace({
-                                    ...workingSpace,
-                                    [currentQuestion?.id || 0]: e.target.value
-                                })}
-                                className="w-full h-48 bg-white bg-opacity-10 text-white border border-gray-600 rounded-lg p-3 resize-none"
-                                placeholder="Show your reasoning here before submitting your final answer..."
-                            />
-                        </div>
 
                         {/* Multiple Choice Options */}
                         {currentQuestion?.options && (
@@ -361,7 +350,11 @@ function TestContent() {
                                             } text-white`}
                                         >
                                             <span className="font-bold mr-2">{key}:</span> 
-                                            <span>{value}</span>
+                                            <span>{typeof value === 'string' ? 
+                                                (value.includes('$') || value.match(/[⁰¹²³⁴⁵⁶⁷⁸⁹ᵐⁿ⁄√]/) ? 
+                                                    formatMathExpression(value) : value) : 
+                                                value}
+                                            </span>
                                         </button>
                                     ))}
                                 </div>
@@ -383,14 +376,31 @@ function TestContent() {
                                 />
                             </div>
                         )}
+                        
+                        {/* Scratchpad - moved below answer options and renamed */}
+                        <div className="mb-6">
+                            <label className="block text-white text-sm mb-2">
+                                Scratchpad:
+                            </label>
+                            <textarea
+                                ref={workingSpaceRef}
+                                value={workingSpace[currentQuestion?.id || 0] || ""}
+                                onChange={(e) => setWorkingSpace({
+                                    ...workingSpace,
+                                    [currentQuestion?.id || 0]: e.target.value
+                                })}
+                                className="w-full h-48 bg-white bg-opacity-10 text-white border border-gray-600 rounded-lg p-3 resize-none"
+                                placeholder="Use this space to work through your solution (optional)..."
+                            />
+                        </div>
 
-                        {/* Submit Button */}
+                        {/* Submit Button - remove workingSpace requirement */}
                         <div className="flex justify-end">
                             <button
                                 onClick={handleSubmitAnswer}
-                                disabled={!currentAnswer || !workingSpace[currentQuestion?.id || 0]?.trim()}
+                                disabled={!currentAnswer}
                                 className={`px-6 py-3 rounded-lg ${
-                                    currentAnswer && workingSpace[currentQuestion?.id || 0]?.trim()
+                                    currentAnswer
                                     ? 'bg-green-500 hover:bg-green-600 text-white'
                                     : 'bg-gray-500 text-gray-300 cursor-not-allowed'
                                 }`}

@@ -57,3 +57,9 @@
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
+
+html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+}

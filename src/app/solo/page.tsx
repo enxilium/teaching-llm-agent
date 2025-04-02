@@ -2,6 +2,26 @@
 
 import { useState, useEffect } from 'react';
 import { useFlow } from '@/context/FlowContext';
+import 'katex/dist/katex.min.css';
+import { InlineMath, BlockMath } from 'react-katex';
+
+// Helper function to process text with math expressions
+const formatMathExpression = (text: string) => {
+    if (!text) return text;
+    
+    // Handle explicit math delimiters
+    if (text.includes('$')) {
+        return text.split(/(\$.*?\$)/).map((part, index) => {
+            if (part.startsWith('$') && part.endsWith('$')) {
+                const mathExpression = part.slice(1, -1);
+                return <InlineMath key={index} math={mathExpression} />;
+            }
+            return part;
+        });
+    }
+    
+    return text;
+};
 
 // Define the question type without multiple choice options
 interface Question {
@@ -126,7 +146,7 @@ export default function SoloPage() {
                 {/* Question Content */}
                 <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
                     <h2 className="text-xl text-white font-bold mb-4">
-                        {currentQuestion?.question || "Loading question..."}
+                        {formatMathExpression(currentQuestion?.question || "Loading question...")}
                     </h2>
 
                     {/* Working Space - REQUIRED */}
@@ -194,7 +214,7 @@ export default function SoloPage() {
                             {!feedback.correct && currentQuestion?.answer && (
                                 <p className="text-white mt-2">
                                     <span className="font-bold">Correct answer: </span> 
-                                    {currentQuestion.answer}
+                                    {formatMathExpression(currentQuestion.answer)}
                                 </p>
                             )}
                         </div>

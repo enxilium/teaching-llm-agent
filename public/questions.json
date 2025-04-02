@@ -1,12 +1,12 @@
 {
     "questions": [
         {
-            "question": "If 2 = p^3, then 8p must equal what?",
-            "answer": "p^10"
+            "question": "If $2 = p^3$, then $8p$ must equal what?",
+            "answer": "$p^{10}$"
         },
         {
-            "question": "If a^(3/4) = 64, then √a must equal what?",
-            "answer": "4"
+            "question": "If $a^{3/4} = 64$, then $\\sqrt{a}$ must equal what?",
+            "answer": "$4$"
         }
     ]
 }

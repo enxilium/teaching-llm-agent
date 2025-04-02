@@ -5,13 +5,15 @@ interface TypewriterTextProps {
   speed?: number;
   onComplete?: () => void;
   onCharacterTyped?: () => void;
+  skip?: boolean; // Add this new prop
 }
 
 export default function TypewriterText({
   text,
   speed = 30,
   onComplete,
-  onCharacterTyped
+  onCharacterTyped,
+  skip = false // Default to false
 }: TypewriterTextProps) {
   const [displayText, setDisplayText] = useState('');
   const [isComplete, setIsComplete] = useState(false);
@@ -71,7 +73,30 @@ export default function TypewriterText({
     return chunks;
   };
   
+  // Handle skip prop changes
   useEffect(() => {
+    if (skip && !isComplete) {
+      // Cancel any ongoing animation
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      
+      // Immediately display full text
+      setDisplayText(text);
+      setIsComplete(true);
+      
+      // Call completion callback
+      if (onComplete) {
+        onComplete();
+      }
+    }
+  }, [skip, text, isComplete, onComplete]);
+  
+  useEffect(() => {
+    // If skip is true, don't start normal animation
+    if (skip) return;
+    
     // Store the text in ref to make it stable
     textRef.current = text;
     
@@ -94,7 +119,7 @@ export default function TypewriterText({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [text]); // Only restart animation when text actually changes
+  }, [text, skip]); // Only restart animation when text or skip changes
   
   const startAnimation = () => {
     let lastTime = performance.now();

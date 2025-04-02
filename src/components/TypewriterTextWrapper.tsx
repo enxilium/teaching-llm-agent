@@ -1,101 +1,94 @@
-import React, { useEffect, useState, useRef, memo } from 'react';
-import TypewriterText from './TypewriterText';
+import React, { useState, useEffect } from 'react';
+import { InlineMath } from 'react-katex';
+import 'katex/dist/katex.min.css';
 
+// Add skip prop to interface
 interface TypewriterTextWrapperProps {
-    text?: string;
-    content?: string; // Add content as an alternative to text
-    speed?: number;
-    messageId: number;
-    onTypingProgress?: (progress: number) => void;
-    onTypingComplete?: () => void;
+  text: string;
+  speed?: number;
+  messageId: number;
+  onTypingComplete?: () => void;
+  onTypingProgress?: (progress: number) => void;
+  formatMath?: boolean;
+  skip?: boolean; // Add this new prop
 }
 
-// This component "locks in" the text and prevents parent re-renders from restarting the animation
-const TypewriterTextWrapper = ({
-    text,
-    content,
-    speed = 50, // Much faster speed for LLM-like generation
-    messageId,
-    onTypingProgress,
-    onTypingComplete
-}: TypewriterTextWrapperProps) => {
-    // Use refs to track animation state to prevent race conditions
-    const isTypingRef = useRef(true);
-    const isCompletedRef = useRef(false);
-    const isMountedRef = useRef(true);
+// Helper function to process text with math expressions
+const formatMathExpression = (text: string) => {
+    if (!text) return text;
     
-    // Ensure text is a string - prioritize content if both are provided
-    const displayText = content || text || "";
-    const safeText = typeof displayText === 'string' ? displayText : "";
+    // Handle explicit math delimiters
+    if (text.includes('$')) {
+        return text.split(/(\$.*?\$)/).map((part, index) => {
+            if (part.startsWith('$') && part.endsWith('$')) {
+                const mathExpression = part.slice(1, -1);
+                return <InlineMath key={index} math={mathExpression} />;
+            }
+            return part;
+        });
+    }
     
-    // Use a ref to store the original text to prevent animation restart on re-renders
-    const textRef = useRef(safeText);
-    
-    // Track progress for callbacks
-    const [progress, setProgress] = useState(0);
-    const totalLengthRef = useRef(safeText.length);
-    const progressCounterRef = useRef(0);
-    
-    useEffect(() => {
-        // Store original text reference
-        textRef.current = safeText;
-        totalLengthRef.current = safeText.length;
-        
-        // Set mounted flag
-        isMountedRef.current = true;
-        isTypingRef.current = true;
-        isCompletedRef.current = false;
-        progressCounterRef.current = 0;
-        
-        return () => {
-            // Cleanup on unmount
-            isMountedRef.current = false;
-        };
-    }, [safeText]);
-    
-    const handleChunkTyped = () => {
-        if (!isMountedRef.current || !isTypingRef.current) return;
-        
-        // Increment progress counter - estimate based on chunks
-        // We'll increment by approx. 5-10% each time a chunk is typed
-        progressCounterRef.current += Math.min(10, Math.floor(totalLengthRef.current * 0.08));
-        
-        // Calculate progress as a percentage and clamp it to 100%
-        const newProgress = Math.min(100, Math.floor(progressCounterRef.current * 100 / totalLengthRef.current));
-        setProgress(newProgress);
-        
-        // Call progress callback
-        if (onTypingProgress) {
-            onTypingProgress(newProgress);
-        }
-    };
-    
-    const handleComplete = () => {
-        if (!isMountedRef.current || isCompletedRef.current) return;
-        
-        // Mark as completed to prevent duplicate callbacks
-        isTypingRef.current = false;
-        isCompletedRef.current = true;
-        
-        // Update progress to 100%
-        setProgress(100);
-        
-        // Call complete callback
-        if (onTypingComplete) {
-            onTypingComplete();
-        }
-    };
-    
-    // Use the original text to prevent animation restart
-    return (
-        <TypewriterText
-            key={`typewriter-${messageId}`} // Stable key based on message ID
-            text={textRef.current}
-            speed={speed} 
-            onComplete={handleComplete}
-            onCharacterTyped={handleChunkTyped} // Now this is called for each chunk
-        />
-    );
+    return text;
 };
 
-export default TypewriterTextWrapper;
+export default function TypewriterTextWrapper({
+    text,
+    speed = 20,
+    messageId,
+    onTypingComplete,
+    onTypingProgress,
+    formatMath = false,
+    skip = false // Default to false
+}: TypewriterTextWrapperProps) {
+    const [displayText, setDisplayText] = useState("");
+    const [isTyping, setIsTyping] = useState(true);
+    const [charIndex, setCharIndex] = useState(0);
+    
+    // Watch for skip prop changes to immediately complete typing
+    useEffect(() => {
+        if (skip && isTyping) {
+            // Immediately complete the typing
+            setDisplayText(text);
+            setCharIndex(text.length);
+            setIsTyping(false);
+            
+            // Call the completion callback
+            if (onTypingComplete) {
+                onTypingComplete();
+            }
+        }
+    }, [skip, text, isTyping, onTypingComplete]);
+    
+    useEffect(() => {
+        // If skip is true, don't start normal typing
+        if (skip) return;
+        
+        if (charIndex < text.length) {
+            const timer = setTimeout(() => {
+                setDisplayText(text.substring(0, charIndex + 1));
+                setCharIndex(charIndex + 1);
+                
+                // Report progress
+                if (onTypingProgress) {
+                    onTypingProgress(charIndex / text.length);
+                }
+            }, speed);
+            
+            return () => clearTimeout(timer);
+        } else {
+            setIsTyping(false);
+            
+            // Call completion callback when typing is done
+            if (onTypingComplete) {
+                onTypingComplete();
+            }
+        }
+    }, [charIndex, text, speed, onTypingComplete, onTypingProgress, skip]);
+    
+    return (
+        <div className="whitespace-pre-wrap">
+            {formatMath ? formatMathExpression(displayText) : displayText}
+            {isTyping && <span className="animate-pulse">▋</span>}
+        </div>
+    );
+}
