@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 
-// Add skip prop to interface
 interface TypewriterTextWrapperProps {
   text: string;
   speed?: number;
@@ -10,7 +9,7 @@ interface TypewriterTextWrapperProps {
   onTypingComplete?: () => void;
   onTypingProgress?: (progress: number) => void;
   formatMath?: boolean;
-  skip?: boolean; // Add this new prop
+  skip?: boolean; // Add skip prop
 }
 
 // Helper function to process text with math expressions
@@ -44,10 +43,10 @@ export default function TypewriterTextWrapper({
     const [isTyping, setIsTyping] = useState(true);
     const [charIndex, setCharIndex] = useState(0);
     
-    // Watch for skip prop changes to immediately complete typing
+    // Handle skip prop changes to immediately complete typing
     useEffect(() => {
         if (skip && isTyping) {
-            // Immediately complete the typing
+            // Immediately complete the typing animation
             setDisplayText(text);
             setCharIndex(text.length);
             setIsTyping(false);
@@ -60,7 +59,7 @@ export default function TypewriterTextWrapper({
     }, [skip, text, isTyping, onTypingComplete]);
     
     useEffect(() => {
-        // If skip is true, don't start normal typing
+        // Skip the normal typing if skip is true
         if (skip) return;
         
         if (charIndex < text.length) {
@@ -68,7 +67,6 @@ export default function TypewriterTextWrapper({
                 setDisplayText(text.substring(0, charIndex + 1));
                 setCharIndex(charIndex + 1);
                 
-                // Report progress
                 if (onTypingProgress) {
                     onTypingProgress(charIndex / text.length);
                 }
@@ -78,7 +76,6 @@ export default function TypewriterTextWrapper({
         } else {
             setIsTyping(false);
             
-            // Call completion callback when typing is done
             if (onTypingComplete) {
                 onTypingComplete();
             }

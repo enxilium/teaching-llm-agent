@@ -160,7 +160,7 @@ export default function MultiPage() {
             }
 
             console.log('No typing in progress, proceeding with action');
-            callback();
+                callback();
         };
 
         tryCallback();
@@ -318,7 +318,7 @@ export default function MultiPage() {
 
     // Handle submission of answer
     const handleSend = () => {
-        if (!finalAnswer.trim() || !scratchboardContent.trim() || typingMessageIds.length > 0) return;
+        if (!finalAnswer.trim() || !scratchboardContent.trim()) return;
 
         setLastUserActivityTime(Date.now());
 
@@ -348,25 +348,27 @@ export default function MultiPage() {
     const autoSubmitTimeoutAnswer = () => {
         console.log('Auto-submitting answer due to timeout');
 
+        // Immediately set flags to prevent further edits
         setIsQuestioningEnabled(false);
         roundEndedRef.current = true;
+        setHasSubmittedAnswer(true);
 
+        // Use current values, even if empty
         const submissionText = finalAnswer.trim() || "No answer provided";
 
-        ensureNoTypingInProgress(() => {
-            const userTimeoutMessage: Message = {
-                id: getUniqueMessageId(),
-                sender: 'user',
-                text: `I didn't complete my answer before time expired.\n\nMy partial answer: ${submissionText}\n\nMy work so far:\n${scratchboardContent}`,
-                timestamp: new Date().toISOString()
-            };
+        // Create a user message with the timeout info
+        const userTimeoutMessage: Message = {
+            id: getUniqueMessageId(),
+            sender: 'user',
+            text: `My partial answer: ${submissionText}\n\nMy work so far:\n${scratchboardContent}`,
+            timestamp: new Date().toISOString()
+        };
 
-            setMessages([userTimeoutMessage]);
-            setHasSubmittedAnswer(true);
-
-            // Generate evaluation since time expired
-            generateEvaluation(submissionText, currentQuestion);
-        });
+        // Add message and start classroom discussion directly
+        setMessages([userTimeoutMessage]);
+        
+        // Use the same flow as normal submission
+        startClassroomDiscussion(currentQuestion, submissionText, scratchboardContent);
     };
 
     // Update the startClassroomDiscussion flow to include Bob's response to the peer's question
@@ -885,112 +887,6 @@ You should sound like a student who deeply understands mathematical concepts but
     };
 
     // Function for evaluation on timeout
-    const generateEvaluation = async (userAnswer: string, question: any) => {
-        console.log('Generating evaluation for timeout answer');
-
-        // For timeout scenarios, we go straight to showing the official solution
-        // rather than a classroom discussion
-        generateOfficialSolution(question);
-    };
-
-    // Function to generate and display the official solution
-    const generateOfficialSolution = async (question: any) => {
-        console.log('Generating official solution');
-
-        // Add system message about time expiring
-        const timeoutMessageId = getUniqueMessageId();
-        setMessages((prev) => [
-            ...prev,
-            {
-                id: timeoutMessageId,
-                sender: 'system',
-                text: 'Time has expired. Here is the official solution:',
-                timestamp: new Date().toISOString()
-            }
-        ]);
-
-        // Add a typing indicator for the solution
-        const solutionMessageId = getUniqueMessageId();
-        setMessages((prev) => [
-            ...prev,
-            {
-                id: solutionMessageId,
-                sender: 'system',
-                text: '...',
-                timestamp: new Date().toISOString()
-            }
-        ]);
-
-        // Add to typing state
-        setTypingMessageIds((prev) => [...prev, solutionMessageId]);
-
-        try {
-            // Format the question
-            const questionText = getQuestionText(question);
-
-            // Get the correct answer if available
-            const correctAnswer = typeof question === 'object' && question.answer
-                ? question.answer
-                : typeof question === 'object' && question.correctAnswer
-                    ? question.correctAnswer
-                    : "Not provided";
-
-            // Generate official solution
-            const response = await aiService.generateResponse(
-                [
-                    {
-                        id: 1,
-                        sender: 'user',
-                        text: `Provide the complete official solution to this problem:
-                        
-${questionText}
-
-The correct answer is: ${correctAnswer}
-
-Explain the solution step-by-step with clear reasoning. Use LaTeX notation for mathematical expressions.`
-                    }
-                ],
-                {
-                    systemPrompt: `You are providing the official solution to a math problem. Be clear, precise, and thorough in your explanation. 
-                    Show all necessary steps and reasoning. Use LaTeX notation enclosed in $ symbols for mathematical expressions.`,
-                    model: currentModel
-                }
-            );
-
-            // Replace typing indicator with actual solution
-            setMessages(prev => prev.map(msg =>
-                msg.id === solutionMessageId
-                    ? {
-                        ...msg,
-                        text: typeof response === 'string' ? response : JSON.stringify(response),
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Set evaluation as complete to enable the "Next Question" button
-            setEvaluationComplete(true);
-        } catch (error) {
-            console.error('Error generating official solution:', error);
-
-            // Provide a fallback message
-            setMessages(prev =>
-                prev.map((msg) =>
-                    msg.id === solutionMessageId
-                        ? {
-                            ...msg,
-                            text: "Sorry, I couldn't generate the official solution. Please proceed to the next question.",
-                            timestamp: new Date().toISOString()
-                        }
-                        : msg
-                )
-            );
-
-            setEvaluationComplete(true);
-        }
-    };
-
-    // Generate peer's answer to the problem
     const generatePeerAnswer = async (
         messageId: number,
         peerId: string,
@@ -1410,15 +1306,15 @@ Be authentic - you're a student who deeply understands mathematical concepts but
         } catch (error) {
             console.error(`Error generating ${studentId}'s response:`, error);
             
-            // Provide character-appropriate fallback
+            // Define fallback responses based on student type
             let fallbackText = '';
-            
             if (studentId === 'concept') {
-                fallbackText = "I think I can help with the calculation part. If we work through the steps like this... [calculation steps]. Though I'm not 100% sure why this approach is the best way to solve it.";
+                fallbackText = "I think what the teacher is explaining makes sense for the calculation part. If we apply the formula step-by-step, we can solve this - though I'm not entirely sure why this specific approach works compared to other methods.";
             } else {
-                fallbackText = "From a conceptual standpoint, this is about understanding how to structure the problem. The key insight is... though I might have made a small error in my calculation just now.";
+                fallbackText = "From a conceptual perspective, this problem is about understanding the constraints and how they affect the mathematical structure. The key insight is recognizing the pattern, though I might have made an arithmetic error somewhere in my calculations.";
             }
             
+            // Replace typing indicator with fallback response
             setMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
@@ -1428,6 +1324,9 @@ Be authentic - you're a student who deeply understands mathematical concepts but
                     }
                     : msg
             ));
+            
+            // Add to typing state for typewriter effect
+            setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
 
@@ -1435,7 +1334,7 @@ Be authentic - you're a student who deeply understands mathematical concepts but
     const handleUserQuestion = () => {
         if (!input.trim()) return;
         
-        // Interrupt any ongoing typewriter animations
+        // Immediately stop any ongoing typewriter animations
         if (typingMessageIds.length > 0) {
             setSkipTypewriter(true);
         }
@@ -1464,7 +1363,6 @@ Be authentic - you're a student who deeply understands mathematical concepts but
         }
         
         // Reset skip flag after setting up the new message responses
-        // This ensures new typewriter animations will run normally
         setTimeout(() => setSkipTypewriter(false), 0);
     };
 
@@ -1602,13 +1500,10 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                             />
                             <button
                                 onClick={() => handleSend()}
-                                disabled={
-                                    !finalAnswer.trim() || !scratchboardContent.trim() || typingMessageIds.length > 0
-                                }
+                                // Only disable if truly empty - not based on typing status
+                                disabled={!finalAnswer.trim() || !scratchboardContent.trim()}
                                 className={`px-4 py-3 rounded-md text-lg font-medium ${
-                                    finalAnswer.trim() &&
-                                    scratchboardContent.trim() &&
-                                    typingMessageIds.length === 0
+                                    finalAnswer.trim() && scratchboardContent.trim()
                                         ? 'bg-blue-600 hover:bg-blue-700 text-white'
                                         : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                                 }`}
@@ -1784,9 +1679,10 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                                 />
                                 <button
                                     onClick={handleUserQuestion}
-                                    disabled={!input.trim() || typingMessageIds.length > 0}
+                                    // Only disable if input is empty - not based on typing status
+                                    disabled={!input.trim()}
                                     className={`px-4 py-2 rounded-md ${
-                                        input.trim() && typingMessageIds.length === 0
+                                        input.trim()
                                             ? 'bg-blue-600 hover:bg-blue-700 text-white'
                                             : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                                     }`}
