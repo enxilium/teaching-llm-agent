@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { nanoid } from 'nanoid';
+import UserService from '@/services/UserService';
 
 // Define flow stages
 type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
@@ -11,6 +13,7 @@ type LessonType = 'group' | 'multi' | 'single' | 'solo';
 
 // Define context type
 interface FlowContextType {
+    userId: string; // Add this
     currentStage: FlowStage;
     lessonType: LessonType;
     lessonQuestionIndex: number;
@@ -27,6 +30,7 @@ interface FlowContextType {
 
 // Create context with default values
 const FlowContext = createContext<FlowContextType>({
+    userId: '', // Add this
     currentStage: 'terms',
     lessonType: 'solo',
     lessonQuestionIndex: 0,
@@ -45,6 +49,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     const router = useRouter();
     
     // State definitions with localStorage persistence
+    const [userId, setUserId] = useState<string>('');
     const [currentStage, setCurrentStage] = useState<FlowStage>('terms');
     const [lessonType, setLessonType] = useState<LessonType>('solo');
     const [lessonQuestionIndex, setLessonQuestionIndex] = useState<number>(0);
@@ -64,6 +69,14 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             try {
                 logDebug("Initializing flow context...");
                 
+                // Get or create userId
+                let savedUserId = localStorage.getItem('userId');
+                if (!savedUserId) {
+                    savedUserId = nanoid();
+                    localStorage.setItem('userId', savedUserId);
+                }
+                setUserId(savedUserId);
+
                 const savedStage = localStorage.getItem('currentStage') as FlowStage | null;
                 const savedLessonType = localStorage.getItem('lessonType') as LessonType | null;
                 const savedQuestionIndex = localStorage.getItem('lessonQuestionIndex');
@@ -103,6 +116,18 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
                     localStorage.setItem('lessonQuestionIndex', randomQuestionIndex.toString()); // Save immediately
                 }
                 
+                // Sync with MongoDB
+                if (savedUserId) {
+                    UserService.createOrUpdateUser({
+                        userId: savedUserId,
+                        flowStage: savedStage || 'terms',
+                        lessonType: savedLessonType || lessonType,
+                        lessonQuestionIndex: savedQuestionIndex ? parseInt(savedQuestionIndex) : lessonQuestionIndex
+                    }).catch(error => {
+                        console.error("Error syncing user data:", error);
+                    });
+                }
+
                 setInitialized(true);
             } catch (error) {
                 console.error("Error loading flow state:", error);
@@ -143,61 +168,99 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     
     // Stage transition methods
     const agreeToTerms = () => {
-        // Explicitly update the stage first
+        // Update stage
         setCurrentStage('pre-test');
         
-        // Force save to localStorage to ensure it's persisted immediately
+        // Save to localStorage
         if (typeof window !== 'undefined') {
             localStorage.setItem('currentStage', 'pre-test');
         }
+
+        // Sync with MongoDB via API
+        if (userId) {
+            UserService.createOrUpdateUser({
+                userId,
+                flowStage: 'pre-test'
+            }).catch(error => {
+                console.error("Error syncing user data:", error);
+            });
+        }
         
-        // Add a slight delay before redirect to ensure state updates
+        // Navigate
         setTimeout(() => {
             router.push('/test?stage=pre');
         }, 100);
     };
     
     const completePreTest = () => {
-        // Always generate a NEW random lesson type here, instead of using the existing one
-        const lessonTypes: LessonType[] = ['group', 'multi', 'single', 'solo'];
-        const randomLessonType = lessonTypes[Math.floor(Math.random() * lessonTypes.length)];
-        console.log(`completePreTest: Generated random lesson type: ${randomLessonType}`);
-        
-        // Update state and localStorage
-        setLessonType(randomLessonType);
+        // Update stage
         setCurrentStage('lesson');
         
+        // Save to localStorage
         if (typeof window !== 'undefined') {
-            localStorage.setItem('lessonType', randomLessonType);
             localStorage.setItem('currentStage', 'lesson');
         }
         
-        // Use a short timeout to ensure state updates before navigation
+        // Sync with MongoDB
+        if (userId) {
+            UserService.createOrUpdateUser({
+                userId,
+                flowStage: 'lesson'
+            }).catch(error => {
+                console.error("Error syncing user data:", error);
+            });
+        }
+        
+        // Navigate to appropriate lesson type
         setTimeout(() => {
-            console.log(`Navigating to lesson type: ${randomLessonType}`);
-            router.push(`/${randomLessonType}`);
+            router.push(`/${lessonType}`);
         }, 100);
     };
     
     const completeLesson = () => {
+        // Update stage
         setCurrentStage('tetris-break');
         
+        // Save to localStorage
         if (typeof window !== 'undefined') {
             localStorage.setItem('currentStage', 'tetris-break');
         }
         
+        // Sync with MongoDB
+        if (userId) {
+            UserService.createOrUpdateUser({
+                userId,
+                flowStage: 'tetris-break'
+            }).catch(error => {
+                console.error("Error syncing user data:", error);
+            });
+        }
+        
+        // Navigate
         setTimeout(() => {
             router.push('/break');
         }, 100);
     };
     
     const completeTetrisBreak = () => {
+        // Update stage
         setCurrentStage('post-test');
         
+        // Save to localStorage
         if (typeof window !== 'undefined') {
             localStorage.setItem('currentStage', 'post-test');
             // Force clear any captcha state
             localStorage.removeItem('captchaPassed');
+        }
+        
+        // Sync with MongoDB
+        if (userId) {
+            UserService.createOrUpdateUser({
+                userId,
+                flowStage: 'post-test'
+            }).catch(error => {
+                console.error("Error syncing user data:", error);
+            });
         }
         
         // Use router.replace instead of push to avoid history issues
@@ -207,25 +270,50 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     };
     
     const completePostTest = () => {
+        // Update stage
         setCurrentStage('final-test');
         
+        // Save to localStorage
         if (typeof window !== 'undefined') {
             localStorage.setItem('currentStage', 'final-test');
         }
         
+        // Sync with MongoDB
+        if (userId) {
+            UserService.createOrUpdateUser({
+                userId,
+                flowStage: 'final-test'
+            }).catch(error => {
+                console.error("Error syncing user data:", error);
+            });
+        }
+        
+        // Navigate
         setTimeout(() => {
             router.push('/test?stage=final');
         }, 100);
     };
     
     const completeFinalTest = () => {
+        // Update stage
         setCurrentStage('completed');
         
+        // Save to localStorage
         if (typeof window !== 'undefined') {
             // Clear any problematic state
             localStorage.removeItem('captchaPassed');
             // Set the completed stage
             localStorage.setItem('currentStage', 'completed');
+        }
+        
+        // Sync with MongoDB
+        if (userId) {
+            UserService.createOrUpdateUser({
+                userId,
+                flowStage: 'completed'
+            }).catch(error => {
+                console.error("Error syncing user data:", error);
+            });
         }
         
         // Use router.replace to avoid history issues
@@ -236,6 +324,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     
     // Context value
     const value = {
+        userId, // Add userId to context value
         currentStage,
         lessonType,
         lessonQuestionIndex,

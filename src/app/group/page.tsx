@@ -8,6 +8,7 @@ import { aiService, AI_MODELS } from '@/services/AI';
 import { Message } from '@/utils/types';
 import TypewriterTextWrapper from "@/components/TypewriterTextWrapper";
 import { useFlow } from '@/context/FlowContext';
+import SessionService from '@/services/SessionService';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
@@ -102,7 +103,8 @@ IMPORTANT: Don't correct your own calculation errors unless someone else points 
 
 export default function PeerOnlyPage() {
     const router = useRouter();
-    const { currentStage, completeLesson } = useFlow();
+    const { currentStage, completeLesson, userId } = useFlow();
+    const [sessionStartTime] = useState<Date>(new Date());
 
     // State management
     const [messages, setMessages] = useState<Message[]>([]);
@@ -138,6 +140,51 @@ export default function PeerOnlyPage() {
         if (typeof question === 'string') return question;
         if (question && typeof question === 'object' && question.question) return question.question;
         return JSON.stringify(question);
+    };
+
+    // Add a function to check answer correctness
+    const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
+        if (!question || !question.correctAnswer) return false;
+
+        // Simple string comparison (enhance as needed)
+        const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+        const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
+
+        return normalizedUserAnswer === normalizedCorrectAnswer;
+    };
+
+    // Update saveSessionData to include correctness
+    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+        try {
+            // Calculate session duration in seconds
+            const endTime = new Date();
+            const durationMs = endTime.getTime() - sessionStartTime.getTime();
+            const durationSeconds = Math.floor(durationMs / 1000);
+
+            // Get the question text
+            const questionText = getQuestionText(currentQuestion);
+
+            // Check if the answer is correct
+            const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
+
+            await SessionService.createSession({
+                userId,
+                questionId: currentQuestionIndex,
+                questionText,
+                startTime: sessionStartTime,
+                endTime,
+                duration: durationSeconds,
+                finalAnswer: finalAnswerText,
+                scratchboardContent,
+                messages,
+                isCorrect,
+                timeoutOccurred: isTimeout
+            });
+
+            console.log('Session data saved successfully');
+        } catch (error) {
+            console.error('Error saving session data:', error);
+        }
     };
 
     // Load questions from JSON file
@@ -374,6 +421,9 @@ export default function PeerOnlyPage() {
             
             // Stop the timer when chat interface appears
             roundEndedRef.current = true;
+
+            // Save session data
+            saveSessionData(finalAnswer, false);
             
             // Start bot discussion after submission
             startBotDiscussion(currentQuestion, finalAnswer, scratchboardContent);
@@ -841,6 +891,9 @@ IMPORTANT: Don't apologize for or doubt your conceptual understanding. Only ackn
             setMessages([userTimeoutMessage]);
             setHasSubmittedAnswer(true); // Show the chat interface
             
+            // Save session data with timeout flag
+            saveSessionData(submissionText, true);
+
             // Start bot discussion after time expires
             startTimeoutDiscussion(currentQuestion, submissionText, scratchboardContent);
         });

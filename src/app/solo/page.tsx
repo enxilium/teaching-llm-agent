@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useFlow } from '@/context/FlowContext';
+import SessionService from '@/services/SessionService';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
@@ -31,7 +32,8 @@ interface Question {
 }
 
 export default function SoloPage() {
-    const { completeLesson, lessonQuestionIndex, currentStage } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId } = useFlow();
+    const [sessionStartTime] = useState<Date>(new Date());
     
     // Ensure user is in the proper flow stage
     useEffect(() => {
@@ -79,6 +81,51 @@ export default function SoloPage() {
         fetchQuestion();
     }, [lessonQuestionIndex]);
     
+    // Add a function to check answer correctness
+    const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
+        if (!question || !question.answer) return false;
+        
+        // Simple string comparison (enhance as needed)
+        const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+        const normalizedCorrectAnswer = question.answer.trim().toLowerCase();
+        
+        return normalizedUserAnswer === normalizedCorrectAnswer;
+    };
+
+    // Add this function to save session data
+    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+        try {
+            // Calculate session duration in seconds
+            const endTime = new Date();
+            const durationMs = endTime.getTime() - sessionStartTime.getTime();
+            const durationSeconds = Math.floor(durationMs / 1000);
+            
+            // Get the question text
+            const questionText = currentQuestion?.question || '';
+            
+            // Check if the answer is correct
+            const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
+            
+            await SessionService.createSession({
+                userId,
+                questionId: currentQuestion?.id || 0,
+                questionText,
+                startTime: sessionStartTime,
+                endTime,
+                duration: durationSeconds,
+                finalAnswer: finalAnswerText,
+                scratchboardContent,
+                messages: [],
+                isCorrect,
+                timeoutOccurred: isTimeout
+            });
+            
+            console.log('Session data saved successfully');
+        } catch (error) {
+            console.error('Error saving session data:', error);
+        }
+    };
+
     // Check answer and provide feedback
     const checkAnswer = () => {
         // Reset error state
@@ -111,6 +158,9 @@ export default function SoloPage() {
             correct: isCorrect
         });
         
+        // Save session data
+        saveSessionData(finalAnswer, false);
+
         // After a delay, allow continuing to the next stage
         setTimeout(() => {
             setShowingSolution(true);
@@ -121,6 +171,12 @@ export default function SoloPage() {
     const handleFinishLesson = () => {
         // Continue to the next stage (tetris break) by directly calling completeLesson
         completeLesson();
+    };
+
+    // Auto-submit timeout answer
+    const autoSubmitTimeoutAnswer = () => {
+        const submissionText = finalAnswer || '';
+        saveSessionData(submissionText, true);
     };
     
     // If questions haven't loaded yet

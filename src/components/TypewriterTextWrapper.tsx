@@ -9,7 +9,7 @@ interface TypewriterTextWrapperProps {
   onTypingComplete?: () => void;
   onTypingProgress?: (progress: number) => void;
   formatMath?: boolean;
-  skip?: boolean; // Add skip prop
+  skip?: boolean;
 }
 
 // Helper function to process text with math expressions
@@ -37,7 +37,7 @@ export default function TypewriterTextWrapper({
     onTypingComplete,
     onTypingProgress,
     formatMath = false,
-    skip = false // Default to false
+    skip = false
 }: TypewriterTextWrapperProps) {
     const [displayText, setDisplayText] = useState("");
     const [isTyping, setIsTyping] = useState(true);
@@ -46,12 +46,10 @@ export default function TypewriterTextWrapper({
     // Handle skip prop changes to immediately complete typing
     useEffect(() => {
         if (skip && isTyping) {
-            // Immediately complete the typing animation
             setDisplayText(text);
             setCharIndex(text.length);
             setIsTyping(false);
             
-            // Call the completion callback
             if (onTypingComplete) {
                 onTypingComplete();
             }
@@ -59,7 +57,6 @@ export default function TypewriterTextWrapper({
     }, [skip, text, isTyping, onTypingComplete]);
     
     useEffect(() => {
-        // Skip the normal typing if skip is true
         if (skip) return;
         
         if (charIndex < text.length) {
@@ -83,9 +80,9 @@ export default function TypewriterTextWrapper({
     }, [charIndex, text, speed, onTypingComplete, onTypingProgress, skip]);
     
     return (
-        <div className="whitespace-pre-wrap">
+        <div className="whitespace-pre-wrap break-words text-message">
             {formatMath ? formatMathExpression(displayText) : displayText}
-            {isTyping && <span className="animate-pulse">▋</span>}
+            {isTyping && <span className="typing-cursor">▋</span>}
         </div>
     );
 }

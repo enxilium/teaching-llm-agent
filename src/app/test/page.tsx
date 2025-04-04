@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 // Add KaTeX for math formatting
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
+import TestService from '@/services/TestService';
 
 // Define test questions structure
 interface TestQuestion {
@@ -45,7 +46,8 @@ function TestContent() {
         completePostTest, 
         completeFinalTest,
         lessonQuestionIndex,
-        currentStage
+        currentStage,
+        userId
     } = useFlow();
 
     // Timer state
@@ -222,6 +224,49 @@ function TestContent() {
         }
     };
 
+    // Function to save test results
+    const saveTestResults = async (questions: TestQuestion[], answers: string[]) => {
+        // Determine test type based on current stage
+        let testType: 'pre' | 'post' | 'final';
+        if (currentStage === 'pre-test') testType = 'pre';
+        else if (currentStage === 'post-test') testType = 'post';
+        else testType = 'final';
+        
+        // Calculate score and format questions
+        let score = 0;
+        const formattedQuestions = questions.map((question, index) => {
+            const userAnswer = answers[index] || '';
+            const correctAnswer = question.correctAnswer || '';
+            const isCorrect = userAnswer.toLowerCase() === correctAnswer.toLowerCase();
+            
+            if (isCorrect) score++;
+            
+            return {
+                questionId: question.id,
+                question: question.question,
+                userAnswer,
+                correctAnswer,
+                isCorrect
+            };
+        });
+        
+        // Calculate percentage score
+        const percentageScore = (score / questions.length) * 100;
+        
+        // Save the test attempt
+        try {
+            await TestService.saveTestAttempt({
+                userId,
+                testType,
+                questions: formattedQuestions,
+                score: percentageScore
+            });
+            console.log(`${testType} test results saved successfully`);
+        } catch (error) {
+            console.error(`Error saving ${testType} test results:`, error);
+        }
+    };
+
     // Submit answer
     const handleSubmitAnswer = () => {
         if (roundEndedRef.current || !currentAnswer) return;
@@ -240,6 +285,11 @@ function TestContent() {
         // Check if all questions are answered
         const allAnswered = answersRef.current.every(a => a && a.trim() !== '');
         setAllQuestionsAnswered(allAnswered);
+
+        // Save test results
+        if (currentQuestionIndex === allQuestions.length - 1) {
+            saveTestResults(allQuestions, answersRef.current);
+        }
 
         // Handle next question or completion
         if (currentQuestionIndex < allQuestions.length - 1) {
@@ -417,6 +467,57 @@ function TestContent() {
 
 // Main component with Suspense
 export default function TestPage() {
+    const { userId, currentStage } = useFlow();
+  
+    // Function to save test results
+    const saveTestResults = async (questions: TestQuestion[], answers: string[]) => {
+        // Determine test type based on current stage
+        let testType: 'pre' | 'post' | 'final';
+        if (currentStage === 'pre-test') testType = 'pre';
+        else if (currentStage === 'post-test') testType = 'post';
+        else testType = 'final';
+        
+        // Calculate score and format questions
+        let score = 0;
+        const formattedQuestions = questions.map((question, index) => {
+            const userAnswer = answers[index] || '';
+            const correctAnswer = question.correctAnswer || '';
+            const isCorrect = userAnswer.toLowerCase() === correctAnswer.toLowerCase();
+            
+            if (isCorrect) score++;
+            
+            return {
+                questionId: question.id,
+                question: question.question,
+                userAnswer,
+                correctAnswer,
+                isCorrect
+            };
+        });
+        
+        // Calculate percentage score
+        const percentageScore = (score / questions.length) * 100;
+        
+        // Save the test attempt
+        try {
+            await TestService.saveTestAttempt({
+                userId,
+                testType,
+                questions: formattedQuestions,
+                score: percentageScore
+            });
+            console.log(`${testType} test results saved successfully`);
+        } catch (error) {
+            console.error(`Error saving ${testType} test results:`, error);
+        }
+    };
+  
+    // Add this to your submit handler
+    const handleSubmitTest = () => {
+        // Save test results
+        saveTestResults([], []);
+    };
+
     return (
         <Suspense fallback={
             <div className="flex flex-col h-screen justify-center items-center bg-gray-900 text-white">

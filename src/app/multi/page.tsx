@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { Message } from '@/utils/types';
 import TypewriterTextWrapper from '@/components/TypewriterTextWrapper';
 import { aiService, AI_MODELS } from '@/services/AI';
+import SessionService from '@/services/SessionService';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
@@ -86,7 +87,8 @@ IMPORTANT: Don't correct your own calculation errors unless someone else points 
 
 export default function MultiPage() {
     const router = useRouter();
-    const { currentStage, completeLesson, lessonQuestionIndex } = useFlow();
+    const { currentStage, completeLesson, lessonQuestionIndex, userId } = useFlow();
+    const [sessionStartTime] = useState<Date>(new Date());
 
     // State for messages, user input, and UI controls
     const [messages, setMessages] = useState<Message[]>([]);
@@ -316,6 +318,51 @@ export default function MultiPage() {
         return () => clearTimeout(timerId);
     }, [timeLeft, hasSubmittedAnswer]);
 
+    // Add a function to check answer correctness
+    const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
+        if (!question || !question.correctAnswer) return false;
+
+        // Simple string comparison (enhance as needed)
+        const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+        const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
+
+        return normalizedUserAnswer === normalizedCorrectAnswer;
+    };
+
+    // Add this function to save session data
+    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+        try {
+            // Calculate session duration in seconds
+            const endTime = new Date();
+            const durationMs = endTime.getTime() - sessionStartTime.getTime();
+            const durationSeconds = Math.floor(durationMs / 1000);
+
+            // Get the question text
+            const questionText = getQuestionText(currentQuestion);
+
+            // Check if the answer is correct
+            const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
+
+            await SessionService.createSession({
+                userId,
+                questionId: currentQuestionIndex,
+                questionText,
+                startTime: sessionStartTime,
+                endTime,
+                duration: durationSeconds,
+                finalAnswer: finalAnswerText,
+                scratchboardContent,
+                messages,
+                isCorrect,
+                timeoutOccurred: isTimeout
+            });
+
+            console.log('Session data saved successfully');
+        } catch (error) {
+            console.error('Error saving session data:', error);
+        }
+    };
+
     // Handle submission of answer
     const handleSend = () => {
         if (!finalAnswer.trim() || !scratchboardContent.trim()) return;
@@ -338,6 +385,9 @@ export default function MultiPage() {
 
             // Disable questioning initially - it will be enabled after the AI discussion sequence
             setIsQuestioningEnabled(false);
+
+            // Save session data
+            saveSessionData(finalAnswer, false);
 
             // Start classroom discussion after submission
             startClassroomDiscussion(currentQuestion, finalAnswer, scratchboardContent);
@@ -366,7 +416,10 @@ export default function MultiPage() {
 
         // Add message and start classroom discussion directly
         setMessages([userTimeoutMessage]);
-        
+
+        // Save session data with timeout flag
+        saveSessionData(submissionText, true);
+
         // Use the same flow as normal submission
         startClassroomDiscussion(currentQuestion, submissionText, scratchboardContent);
     };
@@ -375,10 +428,10 @@ export default function MultiPage() {
     const startClassroomDiscussion = (question: any, studentAnswer: string, scratchpad: string) => {
         // Set timer as paused when discussion starts
         roundEndedRef.current = true;
-        
+
         // First - Concept Gap gives their answer
         const conceptPeerId = getUniqueMessageId();
-        
+
         // Add Concept Gap's message first
         setMessages(prev => [
             ...prev,
@@ -390,11 +443,11 @@ export default function MultiPage() {
                 timestamp: new Date().toISOString(),
                 onComplete: () => {
                     console.log("Concept Gap's answer completed, triggering Arithmetic Gap");
-                    
+
                     // After Concept Gap answers, trigger Arithmetic Gap
                     setTimeout(() => {
                         const arithmeticPeerId = getUniqueMessageId();
-                        
+
                         setMessages(prev => [
                             ...prev,
                             {
@@ -407,7 +460,7 @@ export default function MultiPage() {
                                     // After both peers provide answers, have Bob evaluate all three
                                     setTimeout(() => {
                                         const bobId = getUniqueMessageId();
-                                        
+
                                         setMessages(prev => [
                                             ...prev,
                                             {
@@ -423,7 +476,7 @@ export default function MultiPage() {
                                                         // Randomly select which peer asks first
                                                         const randomPeerId = Math.random() < 0.5 ? 'concept' : 'arithmetic';
                                                         const peerQuestionId = getUniqueMessageId();
-                                                        
+
                                                         setMessages(prev => [
                                                             ...prev,
                                                             {
@@ -436,7 +489,7 @@ export default function MultiPage() {
                                                                     // After peer asks question, Bob responds
                                                                     setTimeout(() => {
                                                                         const bobResponseId = getUniqueMessageId();
-                                                                        
+
                                                                         setMessages(prev => [
                                                                             ...prev,
                                                                             {
@@ -450,7 +503,7 @@ export default function MultiPage() {
                                                                                     setTimeout(() => {
                                                                                         const otherPeerId = randomPeerId === 'concept' ? 'arithmetic' : 'concept';
                                                                                         const otherPeerResponseId = getUniqueMessageId();
-                                                                                        
+
                                                                                         setMessages(prev => [
                                                                                             ...prev,
                                                                                             {
@@ -465,7 +518,7 @@ export default function MultiPage() {
                                                                                                 }
                                                                                             }
                                                                                         ]);
-                                                                                        
+
                                                                                         // Generate the other peer's comment on the discussion
                                                                                         generatePeerComment(
                                                                                             otherPeerResponseId, 
@@ -478,7 +531,7 @@ export default function MultiPage() {
                                                                                 }
                                                                             }
                                                                         ]);
-                                                                        
+
                                                                         // Generate Bob's response to the peer question
                                                                         generateBobResponseToPeer(
                                                                             bobResponseId, 
@@ -490,28 +543,28 @@ export default function MultiPage() {
                                                                 }
                                                             }
                                                         ]);
-                                                        
+
                                                         // Generate peer's question
                                                         generatePeerQuestion(peerQuestionId, randomPeerId, question, bobId);
                                                     }, 1500);
                                                 }
                                             }
                                         ]);
-                                        
+
                                         // Generate Bob's evaluation of all three answers
                                         generateTeacherEvaluation(bobId, question, studentAnswer, conceptPeerId, arithmeticPeerId);
                                     }, 1500);
                                 }
                             }
                         ]);
-                        
+
                         // Generate Arithmetic Gap's answer
                         generatePeerAnswer(arithmeticPeerId, 'arithmetic', question);
                     }, 1500);
                 }
             }
         ]);
-        
+
         // Generate Concept Gap's answer
         generatePeerAnswer(conceptPeerId, 'concept', question);
     };
@@ -1468,13 +1521,13 @@ Focus on conceptual understanding and mathematical principles. You may make smal
     };
 
     return (
-        <div className="h-screen max-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-col overflow-hidden">
+        <div className="chat-page-container bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4">
             {!hasSubmittedAnswer ? (
-                // Before submission - show problem, answer input, and scratchpad as full width
-                <div className="flex flex-col h-full max-h-full overflow-hidden">
+                // Before submission view - full width layout
+                <div className="flex flex-col h-full w-full">
                     {/* Problem Display with Timer */}
                     {currentQuestion && (
-                        <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
+                        <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400 flex-shrink-0">
                             <div className="flex justify-between items-start mb-2">
                                 <h2 className="text-xl text-white font-semibold">Problem:</h2>
                                 <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
@@ -1488,7 +1541,7 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                     )}
 
                     {/* Final Answer Input */}
-                    <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
+                    <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg flex-shrink-0">
                         <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
                         <div className="flex flex-col space-y-3">
                             <input
@@ -1513,27 +1566,27 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                         </div>
                     </div>
 
-                    {/* Scratchboard */}
-                    <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
-                        <div className="flex justify-between mb-2">
+                    {/* Scratchboard - make this scrollable */}
+                    <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-hidden flex flex-col">
+                        <div className="flex justify-between mb-2 flex-shrink-0">
                             <h3 className="text-white font-semibold">Rough Work (Scratchpad)</h3>
                         </div>
                         <textarea
                             value={scratchboardContent}
                             onChange={(e) => setScratchboardContent(e.target.value)}
-                            className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
+                            className="w-full flex-1 min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
                             placeholder="Show your work here... (calculations, reasoning, etc.)"
                         />
                     </div>
                 </div>
             ) : (
-                // After submission - fix the two-panel layout
-                <div className="flex flex-row h-full max-h-full overflow-hidden">
+                // After submission - split panel layout
+                <div className="flex h-full w-full">
                     {/* LEFT PANEL - Problem and Submission */}
-                    <div className="w-1/2 pr-2 flex flex-col h-full max-h-full overflow-hidden">
+                    <div className="w-1/2 pr-2 flex flex-col h-full overflow-hidden">
                         {/* Problem Display */}
                         {currentQuestion && (
-                            <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
+                            <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400 flex-shrink-0">
                                 <div className="flex justify-between items-start mb-2">
                                     <h2 className="text-xl text-white font-semibold">Problem:</h2>
                                 </div>
@@ -1544,28 +1597,28 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                         )}
 
                         {/* Final Answer (read-only) */}
-                        <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400">
+                        <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 flex-shrink-0">
                             <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
                             <div className="p-3 bg-white bg-opacity-10 text-white rounded-md">
                                 {finalAnswer}
                             </div>
                         </div>
 
-                        {/* Scratchboard (read-only) */}
-                        <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
-                            <div className="flex justify-between mb-2">
+                        {/* Scratchboard (read-only) - make this scrollable */}
+                        <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 flex flex-col overflow-hidden">
+                            <div className="flex justify-between mb-2 flex-shrink-0">
                                 <h3 className="text-white font-semibold">Your Work</h3>
                             </div>
-                            <div className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white rounded p-2 overflow-auto whitespace-pre-wrap">
+                            <div className="flex-1 bg-black bg-opacity-40 text-white rounded p-2 overflow-auto whitespace-pre-wrap">
                                 {scratchboardContent}
                             </div>
                         </div>
                     </div>
 
                     {/* RIGHT PANEL - Chat */}
-                    <div className="w-1/2 pl-2 flex flex-col h-full max-h-full overflow-hidden">
+                    <div className="w-1/2 pl-2 flex flex-col h-full overflow-hidden chat-container">
                         {/* Header */}
-                        <div className="bg-black bg-opacity-30 p-2">
+                        <div className="bg-black bg-opacity-30 p-2 flex-shrink-0">
                             <div className="flex space-x-3">
                                 {agents.map((agent) => (
                                     <div key={agent.id} className="flex items-center">
@@ -1582,9 +1635,9 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                             </div>
                         </div>
 
-                        {/* Chat messages container */}
+                        {/* Chat messages container - make this scrollable */}
                         <div
-                            className="flex-1 bg-white bg-opacity-10 rounded-md overflow-y-auto overflow-x-hidden p-2"
+                            className="flex-1 bg-white bg-opacity-10 rounded-md overflow-y-auto overflow-x-hidden p-2 chat-messages"
                             ref={chatContainerRef}
                             onScroll={handleScroll}
                         >
@@ -1611,7 +1664,7 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                                     )}
 
                                     <div
-                                        className={`max-w-[75%] rounded-lg p-3 ${
+                                        className={`chat-message-bubble rounded-lg p-3 ${
                                             msg.sender === 'user'
                                                 ? 'bg-blue-600 text-white'
                                                 : msg.sender === 'system'
@@ -1631,7 +1684,7 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                                                 text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
                                                 speed={20}
                                                 messageId={msg.id}
-                                                skip={skipTypewriter} // Add this prop
+                                                skip={skipTypewriter}
                                                 onTypingProgress={(progress) => {
                                                     if (!userHasScrolledRef.current && !manualScrollOverrideRef.current) {
                                                         scrollToBottom();
@@ -1652,7 +1705,7 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                                                 formatMath={true}
                                             />
                                         ) : (
-                                            <div className="whitespace-pre-wrap">
+                                            <div className="whitespace-pre-wrap break-words text-message">
                                                 {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
                                             </div>
                                         )}
@@ -1662,7 +1715,7 @@ Focus on conceptual understanding and mathematical principles. You may make smal
                         </div>
 
                         {/* Footer / Chat input */}
-                        <div className="bg-black bg-opacity-30 border-t border-gray-700 p-2">
+                        <div className="bg-black bg-opacity-30 border-t border-gray-700 p-2 flex-shrink-0 chat-input">
                             <div className="flex space-x-2">
                                 <input
                                     type="text"

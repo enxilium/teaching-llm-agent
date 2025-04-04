@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { Message } from '@/utils/types';
 import TypewriterTextWrapper from '@/components/TypewriterTextWrapper';
 import { aiService, AI_MODELS } from '@/services/AI';
+import SessionService from '@/services/SessionService';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
@@ -52,7 +53,7 @@ const formatTime = (seconds: number): string => {
 };
 
 export default function SinglePage() {
-    const { completeLesson, lessonQuestionIndex, currentStage } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId } = useFlow();
     
     // Debug line to see what's happening
     console.log("SINGLE PAGE - Current stage:", currentStage, "Question index:", lessonQuestionIndex);
@@ -73,6 +74,7 @@ export default function SinglePage() {
     const [userHasScrolled, setUserHasScrolled] = useState(false);
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
     const [currentModel] = useState(AI_MODELS.CLAUDE_HAIKU.id);
+    const [sessionStartTime] = useState<Date>(new Date());
     
     // --- REFS ---
     const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -152,6 +154,51 @@ export default function SinglePage() {
         }
     };
     
+    // Add a function to check answer correctness
+    const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
+        if (!question || !question.correctAnswer) return false;
+        
+        // Simple string comparison (enhance as needed)
+        const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+        const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
+        
+        return normalizedUserAnswer === normalizedCorrectAnswer;
+    };
+
+    // Update saveSessionData to include correctness
+    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+        try {
+            // Calculate session duration in seconds
+            const endTime = new Date();
+            const durationMs = endTime.getTime() - sessionStartTime.getTime();
+            const durationSeconds = Math.floor(durationMs / 1000);
+            
+            // Get the question text
+            const questionText = getQuestionText(currentQuestion);
+            
+            // Check if the answer is correct
+            const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
+            
+            await SessionService.createSession({
+                userId,
+                questionId: lessonQuestionIndex,
+                questionText,
+                startTime: sessionStartTime,
+                endTime,
+                duration: durationSeconds,
+                finalAnswer: finalAnswerText,
+                scratchboardContent,
+                messages,
+                isCorrect,
+                timeoutOccurred: isTimeout
+            });
+            
+            console.log('Session data saved successfully');
+        } catch (error) {
+            console.error('Error saving session data:', error);
+        }
+    };
+
     // --- EFFECT HOOKS ---
     // Update the flow stage check to match the multi page approach
     useEffect(() => {
@@ -325,6 +372,9 @@ Your goal is to:
         setMessages([userTimeoutMessage]);
         setHasSubmittedAnswer(true); // Show the chat interface
         
+        // Save session data with timeout flag
+        saveSessionData("No answer specified", true);
+
         // Start conversation with Bob, informing him the user didn't provide an answer
         startTimeoutConversation(currentQuestion!, scratchboardContent);
     };
@@ -620,6 +670,9 @@ Your goal is to:
             setIsQuestioningEnabled(true); // Enable questioning
             setHasSubmittedAnswer(true); // Mark that the answer has been submitted
             
+            // Save session data
+            saveSessionData(submissionText, false);
+
             // Start conversation with Bob after submission
             startConversation(
                 currentQuestion!, 
