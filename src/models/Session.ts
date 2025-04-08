@@ -19,6 +19,14 @@ export interface SessionDocument extends Document {
   }[];
   isCorrect: boolean;
   timeoutOccurred: boolean;
+  tempRecord: boolean;
+  surveyData?: {
+    confusionLevel?: string;
+    testDifficulty?: string;
+    perceivedCorrectness?: string;
+    learningAmount?: string;
+    feedback?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,7 +37,15 @@ const MessageSchema = new Schema({
   sender: { type: String, required: true },
   agentId: { type: String, default: null },
   text: { type: String, required: true },
-  timestamp: { type: Date, required: true }
+  timestamp: { type: Date, required: true, default: Date.now }
+}, { _id: false });  // Prevent MongoDB from adding _id to each message
+
+const SurveyDataSchema = new Schema({
+  confusionLevel: { type: String },
+  testDifficulty: { type: String },
+  perceivedCorrectness: { type: String },
+  learningAmount: { type: String },
+  feedback: { type: String }
 });
 
 const SessionSchema = new Schema(
@@ -41,8 +57,7 @@ const SessionSchema = new Schema(
     },
     questionId: { 
       type: Number, 
-      required: true,
-      index: true 
+      required: true 
     },
     questionText: { 
       type: String, 
@@ -50,42 +65,51 @@ const SessionSchema = new Schema(
     },
     startTime: { 
       type: Date, 
-      default: Date.now 
+      required: true 
     },
     endTime: { 
       type: Date, 
-      default: Date.now 
+      required: true 
     },
     duration: { 
       type: Number,
-      default: 0 
+      required: true 
     },
     finalAnswer: { 
       type: String, 
-      default: '' 
+      required: true 
     },
     scratchboardContent: { 
       type: String, 
-      default: '' 
+      required: true 
     },
-    messages: [MessageSchema],
+    messages: {
+      type: [MessageSchema],
+      default: []
+    },
     isCorrect: {
       type: Boolean,
-      default: null
+      default: false
     },
     timeoutOccurred: { 
       type: Boolean, 
       default: false 
+    },
+    tempRecord: {
+      type: Boolean,
+      default: false, // Always false - all records are permanent
+      index: true
+    },
+    surveyData: {
+      type: SurveyDataSchema,
+      default: null
     }
   },
-  { 
-    timestamps: true 
-  }
+  { timestamps: true }
 );
 
-// Create indexes for common queries
-SessionSchema.index({ userId: 1, questionId: 1 });
-SessionSchema.index({ createdAt: -1 });
+// Create compound index for faster queries
+SessionSchema.index({ userId: 1, tempRecord: 1 });
 
 // Create model or get existing one
 const Session = mongoose.models.Session || mongoose.model<SessionDocument>('Session', SessionSchema);

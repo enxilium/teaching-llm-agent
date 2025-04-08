@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
 import { useFlow } from '@/context/FlowContext';
 import CaptchaComponent from '@/components/Captcha';
@@ -8,185 +8,12 @@ import CaptchaComponent from '@/components/Captcha';
 type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
 
 export default function Terms() {
-    const { agreeToTerms, currentStage, resetFlow } = useFlow();
+    const { agreeToTerms } = useFlow();
     const [termsAccepted, setTermsAccepted] = useState(false);
     const [captchaPassed, setCaptchaPassed] = useState(false);
     const [userCaptchaInput, setUserCaptchaInput] = useState("");
     const [captchaSolution, setCaptchaSolution] = useState("");
-    const [showResumeBanner, setShowResumeBanner] = useState(false);
-    const [resumeDestination, setResumeDestination] = useState('');
-    const [debugInfo, setDebugInfo] = useState({
-        stage: '',
-        lessonType: '',
-        questionIndex: ''
-    });
-    
-    // Refresh debug information
-    const refreshDebugInfo = () => {
-        if (typeof window !== 'undefined') {
-            setDebugInfo({
-                stage: localStorage.getItem('currentStage') || 'Not set',
-                lessonType: localStorage.getItem('lessonType') || 'Not set',
-                questionIndex: localStorage.getItem('lessonQuestionIndex') || 'Not set'
-            });
-        }
-    };
-    
-    // Check if user has a session to resume, but don't redirect automatically
-    useEffect(() => {
-        refreshDebugInfo(); // Initialize debug info
-        
-        if (currentStage !== 'terms') {
-            let destination = '';
-            
-            switch(currentStage) {
-                case 'pre-test':
-                    destination = '/test?stage=pre';
-                    break;
-                case 'lesson':
-                    const lessonType = localStorage.getItem('lessonType') || 'solo';
-                    destination = `/${lessonType}`;
-                    break;
-                case 'tetris-break':
-                    destination = '/break';
-                    break;
-                case 'post-test':
-                    destination = '/test?stage=post';
-                    break;
-                case 'final-test':
-                    destination = '/test?stage=final';
-                    break;
-                case 'completed':
-                    destination = '/completed';
-                    break;
-                default:
-                    break;
-            }
-            
-            if (destination) {
-                setResumeDestination(destination);
-                setShowResumeBanner(true);
-            }
-        }
-    }, [currentStage]);
-    
-    // Function to handle resuming the session
-    const handleResume = () => {
-        if (resumeDestination) {
-            window.location.href = resumeDestination;
-        }
-    };
-    
-    // Function to handle starting a new session
-    const handleStartNew = () => {
-        console.log("Starting new session...");
-        
-        // First clear localStorage directly
-        localStorage.clear();
-        console.log("LocalStorage cleared");
-        
-        // Then reset flow state
-        resetFlow();
-        
-        // Clear UI state
-        setShowResumeBanner(false);
-        setResumeDestination('');
-        
-        // Refresh debug info immediately and again after a delay
-        refreshDebugInfo();
-        console.log("Debug info refreshed initially");
-        
-        // Set a longer timeout to ensure state updates are complete
-        setTimeout(() => {
-            console.log("Running delayed debug info refresh");
-            refreshDebugInfo();
-        }, 300);
-    };
-    
-    // Add a debug panel
-    const DebugPanel = () => (
-        <div className="mt-8 bg-black bg-opacity-30 p-4 rounded-lg text-white text-left">
-            <div className="flex justify-between items-center mb-3">
-                <h3 className="font-bold text-lg text-center">Debug Panel</h3>
-                <button 
-                    onClick={refreshDebugInfo}
-                    className="text-sm bg-blue-900 hover:bg-blue-800 px-2 py-1 rounded"
-                >
-                    Refresh
-                </button>
-            </div>
-            
-            <div className="mb-4">
-                <p className="font-semibold">Current Flow State:</p>
-                <ul className="ml-4 text-sm">
-                    <li>Current Stage: <span className="text-yellow-300">{debugInfo.stage}</span></li>
-                    <li>Lesson Type: <span className="text-yellow-300">{debugInfo.lessonType}</span></li>
-                    <li>Question Index: <span className="text-yellow-300">{debugInfo.questionIndex}</span></li>
-                </ul>
-            </div>
-            
-            <div className="mb-4">
-                <p className="font-semibold">Force Lesson Type:</p>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                    {['solo', 'single', 'multi', 'group'].map(type => (
-                        <button
-                            key={type}
-                            onClick={() => {
-                                localStorage.setItem('lessonType', type);
-                                localStorage.setItem('currentStage', 'lesson');
-                                console.log(`Forced lesson type: ${type}`);
-                                alert(`Lesson type set to ${type}. Click "Resume" in the banner to navigate there.`);
-                                setResumeDestination(`/${type}`);
-                                setShowResumeBanner(true);
-                                refreshDebugInfo();
-                            }}
-                            className={`px-3 py-1 text-sm rounded-md ${
-                                debugInfo.lessonType === type 
-                                ? 'bg-green-700 border border-green-500' 
-                                : 'bg-gray-700 hover:bg-gray-600'
-                            }`}
-                        >
-                            {type}
-                        </button>
-                    ))}
-                </div>
-            </div>
-            
-            <div className="border-t border-gray-600 pt-3 mt-3">
-                <button
-                    onClick={() => {
-                        // Generate truly random type
-                        const types = ['solo', 'single', 'multi', 'group'];
-                        // Use current time to create a "more random" selection
-                        const seed = Date.now();
-                        const randomIndex = Math.floor(seed % types.length);
-                        const randomType = types[randomIndex];
-                        
-                        console.log(`Generated random type: ${randomType} (index ${randomIndex})`);
-                        
-                        // Clear all storage
-                        localStorage.clear();
-                        
-                        // Set new random type
-                        localStorage.setItem('lessonType', randomType);
-                        localStorage.setItem('currentStage', 'lesson');
-                        localStorage.setItem('lessonQuestionIndex', Math.floor(Math.random() * 2).toString());
-                        
-                        // Update UI
-                        setResumeDestination(`/${randomType}`);
-                        setShowResumeBanner(true);
-                        refreshDebugInfo();
-                        
-                        alert(`Random lesson type: ${randomType}. Click "Resume" to navigate there.`);
-                    }}
-                    className="w-full bg-purple-800 hover:bg-purple-700 py-1 rounded-md text-sm"
-                >
-                    Generate Random Type
-                </button>
-            </div>
-        </div>
-    );
-    
+
     const handleCaptchaVerification = (e: React.FormEvent) => {
         e.preventDefault();
         if (userCaptchaInput.trim().toUpperCase() === captchaSolution.toUpperCase()) {
@@ -196,7 +23,7 @@ export default function Terms() {
         }
     };
 
-    // If captcha hasn't been passed yet, show the captcha test
+    // When captcha hasn't been passed, show captcha component
     if (!captchaPassed) {
         return (
             <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8 flex flex-col items-center justify-center">
@@ -221,41 +48,13 @@ export default function Terms() {
         );
     }
 
-    // If captcha passed, show the Terms and Conditions page as before
+    // Once captcha is passed, display Terms and Conditions page
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8 flex flex-col items-center justify-center">
-            {/* Resume Session Banner */}
-            {showResumeBanner && (
-                <div className="w-full max-w-3xl bg-blue-900 bg-opacity-70 rounded-xl p-4 mb-6 shadow-lg text-white">
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <h3 className="text-lg font-semibold">Resume Your Session?</h3>
-                            <p className="text-sm opacity-90">
-                                You have an unfinished session. Would you like to continue where you left off?
-                            </p>
-                        </div>
-                        <div className="flex gap-3">
-                            <button 
-                                onClick={handleResume}
-                                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
-                            >
-                                Resume
-                            </button>
-                            <button 
-                                onClick={handleStartNew}
-                                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-white"
-                            >
-                                Start New
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            
             <div className="w-full max-w-3xl bg-white bg-opacity-10 rounded-xl p-8 shadow-lg">
                 <h1 className="text-3xl font-bold text-white text-center mb-6">Terms and Conditions</h1>
                 <div className="h-64 overflow-y-auto bg-white bg-opacity-5 p-6 rounded-lg mb-6 text-white">
-                    {/* Paste your terms content here */}
+                    {/* Your original terms and conditions content */}
                     <p className="mb-4 font-bold">
                         University of Toronto Research Project Participation Consent Form
                     </p>
@@ -300,35 +99,6 @@ export default function Terms() {
                         Begin Study
                     </button>
                 </div>
-                {/* Add reset button for breaking loops */}
-                <div className="mt-8 text-center flex flex-col gap-2">
-                    <button
-                        onClick={() => {
-                            resetFlow();
-                            refreshDebugInfo();
-                        }}
-                        className="text-gray-400 hover:text-white text-sm underline"
-                    >
-                        Reset Study (Debug)
-                    </button>
-                    
-                    <button
-                        onClick={() => {
-                            // Clear all localStorage items
-                            localStorage.clear();
-                            // Refresh debug info
-                            refreshDebugInfo();
-                            // Reload page with timestamp to prevent caching
-                            window.location.href = '/?t=' + Date.now();
-                        }}
-                        className="text-gray-400 hover:text-white text-sm underline mt-4"
-                    >
-                        Start Fresh (Clear Data)
-                    </button>
-                </div>
-                
-                {/* Debug Panel */}
-                <DebugPanel />
             </div>
         </div>
     );

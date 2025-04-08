@@ -17,6 +17,25 @@ export interface SessionData {
 export const SessionService = {
   async createSession(sessionData: SessionData): Promise<any> {
     try {
+      console.log(`Creating session for user ${sessionData.userId} with ${sessionData.messages?.length || 0} messages`);
+      
+      // Ensure messages are properly formatted
+      if (sessionData.messages) {
+        // Print detailed message info for debugging
+        console.log(`Message details before formatting: ${JSON.stringify(sessionData.messages.slice(0, 1))}`);
+        
+        // Make sure each message has the required fields
+        sessionData.messages = sessionData.messages.map((msg: any) => ({
+          id: Number(msg.id) || 0,
+          sender: String(msg.sender || ''),
+          agentId: msg.agentId || null,
+          text: String(msg.text || ''),
+          timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString()
+        }));
+        
+        console.log(`Formatted ${sessionData.messages.length} messages`);
+      }
+      
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: {
@@ -25,29 +44,36 @@ export const SessionService = {
         body: JSON.stringify(sessionData),
       });
       
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to save session');
+      if (!response.ok) {
+        throw new Error(`Error: ${response.status}`);
       }
       
-      return data;
+      return await response.json();
     } catch (error) {
-      console.error('Error saving session data:', error);
+      console.error('Error in createSession:', error);
       throw error;
     }
   },
   
-  async getUserSessions(userId: string): Promise<any[]> {
+  async getUserSessions(userId: string, includeTemp: boolean = false): Promise<any[]> {
     try {
-      const response = await fetch(`/api/sessions?userId=${userId}`);
+      // Build URL with proper parameters
+      const url = includeTemp 
+        ? `/api/sessions?userId=${userId}` 
+        : `/api/sessions?userId=${userId}&tempRecord=false`;
+      
+      console.log(`Fetching sessions from: ${url}`);
+      
+      const response = await fetch(url);
       const data = await response.json();
       
       if (!data.success) {
         throw new Error(data.error || 'Failed to fetch sessions');
       }
       
-      return data.data;
+      console.log(`Received ${data.data?.length || 0} sessions for user ${userId}`);
+      
+      return data.data || [];
     } catch (error) {
       console.error('Error fetching user sessions:', error);
       return [];

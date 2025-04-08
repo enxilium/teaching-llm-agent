@@ -3,11 +3,14 @@ export interface UserData {
   flowStage?: string;
   lessonType?: string;
   lessonQuestionIndex?: number;
+  tempRecord?: boolean;
 }
 
-export const UserService = {
+class UserService {
   async createOrUpdateUser(userData: UserData): Promise<any> {
     try {
+      console.log(`Updating user ${userData.userId}, temp: ${userData.tempRecord !== false}`);
+      
       const response = await fetch('/api/users', {
         method: 'POST',
         headers: {
@@ -16,34 +19,53 @@ export const UserService = {
         body: JSON.stringify(userData),
       });
       
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to save user data');
+      if (!response.ok) {
+        throw new Error(`Error: ${response.status}`);
       }
       
-      return data;
+      return await response.json();
     } catch (error) {
-      console.error('Error saving user data:', error);
+      console.error('Error in createOrUpdateUser:', error);
       throw error;
     }
-  },
-  
+  }
+
   async getUser(userId: string): Promise<any> {
     try {
-      const response = await fetch(`/api/users?userId=${userId}`);
-      const data = await response.json();
+      const response = await fetch(`/api/users/${userId}`);
       
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to fetch user');
+      if (!response.ok) {
+        throw new Error(`Error: ${response.status}`);
       }
       
-      return data.data;
+      return await response.json();
     } catch (error) {
-      console.error('Error fetching user:', error);
-      return null;
+      console.error('Error in getUser:', error);
+      throw error;
     }
   }
-};
+  
+  async finalizeSessions(userId: string): Promise<any> {
+    try {
+      console.log(`Finalizing all sessions for user ${userId}`);
+      
+      const response = await fetch(`/api/users/${userId}/finalize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Error: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error finalizing sessions:', error);
+      throw error;
+    }
+  }
+}
 
-export default UserService;
+export default new UserService();

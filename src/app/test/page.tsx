@@ -47,7 +47,8 @@ function TestContent() {
         completeFinalTest,
         lessonQuestionIndex,
         currentStage,
-        userId
+        userId,
+        saveTestData
     } = useFlow();
 
     // Timer state
@@ -66,6 +67,15 @@ function TestContent() {
     const workingSpaceRef = useRef<HTMLTextAreaElement>(null);
     const [allQuestionsAnswered, setAllQuestionsAnswered] = useState(false);
     const answersRef = useRef<string[]>([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [errors, setErrors] = useState<{ work?: boolean }>({});
+
+    // Add this effect to reset the isSubmitting state when the test stage changes
+    useEffect(() => {
+        // Reset submission state whenever test stage changes
+        setIsSubmitting(false);
+        console.log(`Test stage changed to ${testStage}, resetting submission state`);
+    }, [testStage]);
 
     // Update the flow protection section:
 
@@ -188,8 +198,11 @@ function TestContent() {
         loadQuestions();
     }, [testStage, lessonQuestionIndex]);
 
-    // Auto-submit when time runs out
+    // Updated autoSubmitTimeoutAnswer function
     const autoSubmitTimeoutAnswer = () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+
         console.log("Time's up! Auto-submitting answer and advancing.");
 
         if (roundEndedRef.current) return;
@@ -202,85 +215,162 @@ function TestContent() {
         }
 
         // Record that there was no answer
-        answersRef.current[currentQuestionIndex] = "NO ANSWER - TIME EXPIRED";
+        const timeoutAnswer = "NO ANSWER - TIME EXPIRED";
+        answersRef.current[currentQuestionIndex] = timeoutAnswer;
         setUserAnswers([...answersRef.current]);
+
+        // If this is the final question in any test, save results
+        if (currentQuestionIndex >= allQuestions.length - 1) {
+            saveTestResults(allQuestions, answersRef.current);
+        }
 
         // Advance to next question if available
         if (currentQuestionIndex < allQuestions.length - 1) {
             setCurrentQuestionIndex(currentQuestionIndex + 1);
         } else {
+            // This is the last question, complete the test
             handleTestCompletion();
         }
     };
 
     // Handle test completion based on the stage
-    const handleTestCompletion = () => {
-        if (testStage === 'pre') {
-            completePreTest();
-        } else if (testStage === 'post') {
-            completePostTest();
-        } else if (testStage === 'final') {
-            completeFinalTest();
+    const handleTestCompletion = async () => {
+        // Prevent resubmission if already submitting
+        if (isSubmitting) {
+            console.log("Already submitting, ignoring click");
+            return;
+        }
+        
+        // Set submitting state immediately
+        setIsSubmitting(true);
+        console.log(`${testStage} test completion initiated`);
+        
+        // Add a safety timeout to prevent UI from being stuck indefinitely
+        const safetyTimeout = setTimeout(() => {
+            console.log("Safety timeout triggered - forcing navigation");
+            if (testStage === 'final') {
+                window.location.href = '/completed';
+            } else if (testStage === 'post') {
+                window.location.href = '/test?stage=final';
+            } else {
+                window.location.href = '/';
+            }
+        }, 7000); // 7 seconds max wait time
+        
+        try {
+            // Save test data to flow context
+            saveTestData({
+                testType: testStage as 'pre' | 'post' | 'final',
+                questions: allQuestions.map((q, i) => ({
+                    questionId: q.id,
+                    question: q.question,
+                    userAnswer: userAnswers[i] || '',
+                    correctAnswer: q.correctAnswer || '',
+                    isCorrect: (userAnswers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()
+                })),
+                score: Math.round((allQuestions.filter((q, i) => (userAnswers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()).length / allQuestions.length) * 100),
+                completedAt: new Date()
+            });
+            
+            // Handle the appropriate completion function with proper promise handling
+            if (testStage === 'final') {
+                console.log("Final test - calling completeFinalTest with await");
+                try {
+                    const result = await completeFinalTest();
+                    console.log("completeFinalTest resolved with:", result);
+                } catch (error) {
+                    console.error("completeFinalTest rejected with:", error);
+                    window.location.href = '/completed';
+                }
+            } else if (testStage === 'post') {
+                console.log("Post test - calling completePostTest");
+                completePostTest();
+            } else {
+                console.log("Pre test - calling completePreTest");
+                completePreTest();
+            }
+            
+            // Clear the safety timeout since we completed normally
+            clearTimeout(safetyTimeout);
+            
+        } catch (error) {
+            console.error("Error in handleTestCompletion:", error);
+            
+            // Clear the safety timeout
+            clearTimeout(safetyTimeout);
+            
+            // Reset submission state after 3 seconds so user can try again
+            setTimeout(() => {
+                setIsSubmitting(false);
+            }, 3000);
+            
+            // Show error message to user
+            alert("There was an error submitting your test. Please try again.");
         }
     };
 
     // Function to save test results
-    const saveTestResults = async (questions: TestQuestion[], answers: string[]) => {
-        // Determine test type based on current stage
-        let testType: 'pre' | 'post' | 'final';
-        if (currentStage === 'pre-test') testType = 'pre';
-        else if (currentStage === 'post-test') testType = 'post';
-        else testType = 'final';
+    const saveTestResults = (allQuestions: any[], userAnswers: string[]) => {
+        if (!allQuestions.length) return;
         
-        // Calculate score and format questions
-        let score = 0;
-        const formattedQuestions = questions.map((question, index) => {
-            const userAnswer = answers[index] || '';
-            const correctAnswer = question.correctAnswer || '';
-            const isCorrect = userAnswer.toLowerCase() === correctAnswer.toLowerCase();
+        const testType = testStage as 'pre' | 'post' | 'final';
+        const questions = allQuestions.map((q, i) => {
+            // Never allow empty userAnswer - use placeholder text instead
+            // Make sure we have the right answer from userAnswers
+            let userAnswer = userAnswers[i];
             
-            if (isCorrect) score++;
+            // If userAnswer is empty, null, or undefined, replace with placeholder
+            if (!userAnswer || userAnswer.trim() === '') {
+                console.warn(`Empty answer detected for question ${i+1}, using placeholder`);
+                userAnswer = "No answer provided";
+            }
             
             return {
-                questionId: question.id,
-                question: question.question,
-                userAnswer,
-                correctAnswer,
-                isCorrect
+                questionId: q.id,
+                question: q.question,
+                userAnswer: userAnswer, // Now guaranteed to be non-empty
+                correctAnswer: q.correctAnswer || q.answer || '',
+                isCorrect: (userAnswer.toLowerCase() === (q.correctAnswer || q.answer || '').toLowerCase())
             };
         });
         
-        // Calculate percentage score
-        const percentageScore = (score / questions.length) * 100;
+        // Calculate score based on non-empty answers
+        const correctCount = questions.filter(q => q.isCorrect).length;
+        const score = Math.round((correctCount / questions.length) * 100);
         
-        // Save the test attempt
-        try {
-            await TestService.saveTestAttempt({
-                userId,
-                testType,
-                questions: formattedQuestions,
-                score: percentageScore
-            });
-            console.log(`${testType} test results saved successfully`);
-        } catch (error) {
-            console.error(`Error saving ${testType} test results:`, error);
-        }
+        console.log(`Saving test data to flow: ${testType}, ${questions.length} questions`);
+        console.log('Sample question data:', JSON.stringify(questions[0]));
+        
+        // Save to Flow context with guaranteed userAnswer values
+        saveTestData({
+            testType,
+            questions,
+            score,
+            completedAt: new Date()
+        });
     };
 
     // Submit answer
     const handleSubmitAnswer = () => {
-        if (roundEndedRef.current || !currentAnswer) return;
+        // Prevent resubmission if already submitting
+        if (roundEndedRef.current || !currentAnswer || isSubmitting) return;
+
+        setIsSubmitting(true);
         roundEndedRef.current = true;
 
-        // Stop the timer
-        if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-        }
-
-        // Save answer
+        // Critical: Save the current answer to the userAnswers array
         answersRef.current[currentQuestionIndex] = currentAnswer;
         setUserAnswers([...answersRef.current]);
+        console.log(`Answer for question ${currentQuestionIndex + 1} saved:`, currentAnswer);
+
+        // Only validate scratchboard content for final test
+        const scratchboardContent = workingSpace[currentQuestion?.id || 0] || "";
+        if (testStage === 'final' && !scratchboardContent.trim()) {
+            setErrors(prev => ({ ...prev, work: true }));
+            setIsSubmitting(false); // Reset submission state
+            roundEndedRef.current = false;
+            return;
+        }
 
         // Check if all questions are answered
         const allAnswered = answersRef.current.every(a => a && a.trim() !== '');
@@ -294,12 +384,15 @@ function TestContent() {
         // Handle next question or completion
         if (currentQuestionIndex < allQuestions.length - 1) {
             setCurrentQuestionIndex(currentQuestionIndex + 1);
+            // Reset submission flag after navigation to next question
+            setTimeout(() => setIsSubmitting(false), 500);
         } else {
             handleTestCompletion();
+            // Don't reset flag on completion since we're navigating away
         }
     };
 
-    // Timer effect
+    // Updated timer effect for final test auto-redirection
     useEffect(() => {
         if (roundEndedRef.current) return;
 
@@ -315,7 +408,27 @@ function TestContent() {
                         clearInterval(timerRef.current);
                         timerRef.current = null;
                     }
-                    setTimeout(autoSubmitTimeoutAnswer, 0);
+                    
+                    // For final test, always auto-submit and redirect when time expires
+                    if (testStage === 'final') {
+                        console.log('Final test time expired - redirecting to completed page');
+                        
+                        // Save the current answer (even if empty)
+                        const finalAnswer = currentAnswer.trim() || "NO ANSWER - TIME EXPIRED";
+                        answersRef.current[currentQuestionIndex] = finalAnswer;
+                        setUserAnswers([...answersRef.current]);
+                        
+                        // Save test results before navigating
+                        saveTestResults(allQuestions, answersRef.current);
+                        
+                        // Short timeout to ensure state updates before navigation
+                        setTimeout(() => {
+                            completeFinalTest();
+                        }, 500);
+                    } else {
+                        // For other test stages, use standard timeout logic
+                        setTimeout(autoSubmitTimeoutAnswer, 0);
+                    }
                     return 0;
                 }
                 return prev - 1;
@@ -328,11 +441,15 @@ function TestContent() {
                 timerRef.current = null;
             }
         };
-    }, [currentQuestionIndex]);
+    }, [currentQuestionIndex, testStage, allQuestions]);
 
     // Handle option selection for multiple choice
     const handleOptionSelect = (option: string) => {
+        console.log(`Option selected for question ${currentQuestionIndex + 1}:`, option);
         setCurrentAnswer(option);
+        
+        // Immediately save to answersRef to ensure it's not lost
+        answersRef.current[currentQuestionIndex] = option;
     };
 
     // Get current question
@@ -354,6 +471,29 @@ function TestContent() {
             case 'post': return 'Post-Test Assessment';
             case 'final': return 'Final Test';
             default: return 'Assessment';
+        }
+    };
+
+    const handleSubmitFinalTest = () => {
+        console.log("Final test submit button clicked");
+        
+        // Add a flag to prevent double-clicks
+        if (isSubmitting) {
+            console.log("Already submitting, ignoring click");
+            return;
+        }
+        
+        // Set submitting state
+        setIsSubmitting(true);
+        
+        try {
+            console.log("Saving final test data to flow context");
+            // Your existing code to save test data...
+            
+            console.log("Calling completeFinalTest");
+            completeFinalTest();
+        } catch (error) {
+            console.error("Error in handleSubmitFinalTest:", error);
         }
     };
 
@@ -430,7 +570,10 @@ function TestContent() {
                         {/* Scratchpad - moved below answer options and renamed */}
                         <div className="mb-6">
                             <label className="block text-white text-sm mb-2">
-                                Scratchpad:
+                                Show your work {testStage === 'final' ? '(required)' : '(optional)'}:
+                                {errors.work && testStage === 'final' && (
+                                    <span className="text-red-400 text-xs ml-2">* You must show your work before submitting</span>
+                                )}
                             </label>
                             <textarea
                                 ref={workingSpaceRef}
@@ -444,18 +587,34 @@ function TestContent() {
                             />
                         </div>
 
-                        {/* Submit Button - remove workingSpace requirement */}
+                        {/* Submit Button */}
                         <div className="flex justify-end">
-                            <button
+                            <button 
                                 onClick={handleSubmitAnswer}
-                                disabled={!currentAnswer}
-                                className={`px-6 py-3 rounded-lg ${
-                                    currentAnswer
-                                    ? 'bg-green-500 hover:bg-green-600 text-white'
-                                    : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                                }`}
+                                disabled={
+                                    !currentAnswer.trim() || 
+                                    (testStage === 'final' && !(workingSpace[currentQuestion?.id || 0] || "").trim()) ||
+                                    isSubmitting
+                                }
+                                className={`px-6 py-2 ${
+                                    isSubmitting 
+                                        ? 'bg-gray-500 cursor-not-allowed'
+                                        : !currentAnswer.trim() || (testStage === 'final' && !(workingSpace[currentQuestion?.id || 0] || "").trim())
+                                            ? 'bg-gray-400 cursor-not-allowed'
+                                            : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+                                } text-white rounded-lg flex items-center justify-center`}
                             >
-                                {currentQuestionIndex === allQuestions.length - 1 ? "Complete Test" : "Submit Answer"}
+                                {isSubmitting ? (
+                                    <>
+                                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Submitting...
+                                    </>
+                                ) : (
+                                    currentQuestionIndex === allQuestions.length - 1 ? "Complete Test" : "Submit Answer"
+                                )}
                             </button>
                         </div>
                     </div>
@@ -467,7 +626,11 @@ function TestContent() {
 
 // Main component with Suspense
 export default function TestPage() {
-    const { userId, currentStage } = useFlow();
+    const { 
+      userId, 
+      currentStage,
+      saveTestData // Use this instead of direct API call
+    } = useFlow();
   
     // Function to save test results
     const saveTestResults = async (questions: TestQuestion[], answers: string[]) => {
@@ -496,28 +659,17 @@ export default function TestPage() {
         });
         
         // Calculate percentage score
-        const percentageScore = (score / questions.length) * 100;
+        const percentScore = (score / questions.length) * 100;
         
-        // Save the test attempt
-        try {
-            await TestService.saveTestAttempt({
-                userId,
-                testType,
-                questions: formattedQuestions,
-                score: percentageScore
-            });
-            console.log(`${testType} test results saved successfully`);
-        } catch (error) {
-            console.error(`Error saving ${testType} test results:`, error);
-        }
+        // Save to flow context instead of API
+        saveTestData({
+            testType,
+            questions: formattedQuestions,
+            score: percentScore,
+            completedAt: new Date()
+        });
     };
-  
-    // Add this to your submit handler
-    const handleSubmitTest = () => {
-        // Save test results
-        saveTestResults([], []);
-    };
-
+    
     return (
         <Suspense fallback={
             <div className="flex flex-col h-screen justify-center items-center bg-gray-900 text-white">

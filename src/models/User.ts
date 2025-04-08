@@ -3,8 +3,9 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface UserDocument extends Document {
   userId: string;
   flowStage: string;
-  lessonType: string;
-  lessonQuestionIndex: number;
+  lessonType?: string;
+  lessonQuestionIndex?: number;
+  tempRecord: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,16 +25,18 @@ const UserSchema = new Schema(
     },
     lessonType: {
       type: String,
-      enum: ['group', 'multi', 'single', 'solo'],
-      default: 'solo'
+      enum: ['group', 'multi', 'single', 'solo', null],
+      default: null
     },
     lessonQuestionIndex: {
       type: Number,
       default: 0
+    },
+    tempRecord: {
+      type: Boolean,
+      default: false, // Always false - all records are permanent
+      index: true
     }
-  },
-  {
-    timestamps: true
   }
 );
 

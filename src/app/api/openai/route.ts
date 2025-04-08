@@ -1,58 +1,42 @@
-import { NextResponse } from 'next/server';
-import { AI_MODELS } from '@/services/AI';
+import { NextRequest, NextResponse } from 'next/server';
+import OpenAI from 'openai';
 
-// Don't expose API key on the client side - use server-side only
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-export async function POST(request: Request) {
-    try {
-        const { messages, systemPrompt, model } = await request.json();
+export async function POST(request: NextRequest) {
+  try {
+    const { messages, model, temperature = 0 } = await request.json();
 
-        // Find the model config or use the first OpenAI model as default
-        const modelConfig = Object.values(AI_MODELS).find(m => m.id === model && m.provider === 'openai') ||
-            Object.values(AI_MODELS).find(m => m.provider === 'openai');
-
-        if (!modelConfig) {
-            throw new Error('No OpenAI model configuration found');
-        }
-
-        const openAIMessages = [
-            {
-                role: 'system',
-                content: systemPrompt || 'You are a helpful teaching assistant named Bob who helps students with math problems.'
-            },
-            ...messages.map((msg: any) => ({
-                role: msg.sender === 'user' ? 'user' : 'assistant',
-                content: msg.text
-            }))
-        ];
-
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: modelConfig.id,
-                max_tokens: modelConfig.maxTokens,
-                temperature: modelConfig.temperature,
-                messages: openAIMessages
-            })
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        return NextResponse.json({ message: data.choices[0].message.content });
-    } catch (error) {
-        console.error('Error calling OpenAI API:', error);
-        return NextResponse.json(
-            { error: "Failed to get response from OpenAI" },
-            { status: 500 }
-        );
+    if (!messages || !Array.isArray(messages)) {
+      return NextResponse.json(
+        { error: 'Invalid messages format' },
+        { status: 400 }
+      );
     }
+
+    // Set default model if not provided - always use gpt-4o-2024-08-06
+    const modelId = 'gpt-4o-2024-08-06';
+
+    // Call OpenAI API with temperature=0 for consistency
+    const completion = await openai.chat.completions.create({
+      model: modelId,
+      messages,
+      temperature: 0, // Force temperature=0 for deterministic responses
+      max_tokens: 4096,
+    });
+
+    // Extract the response content
+    const message = completion.choices[0]?.message?.content || '';
+
+    return NextResponse.json({ message });
+  } catch (error: any) {
+    console.error('OpenAI API error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Error calling OpenAI API' },
+      { status: 500 }
+    );
+  }
 }

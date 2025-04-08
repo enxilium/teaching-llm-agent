@@ -6,9 +6,11 @@ import Image from 'next/image';
 import { Message } from '@/utils/types';
 import TypewriterTextWrapper from '@/components/TypewriterTextWrapper';
 import { aiService, AI_MODELS } from '@/services/AI';
-import SessionService from '@/services/SessionService';
+import FlowProtection from '@/components/FlowProtection';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
+import { useRouter } from 'next/navigation';
+import { prepareMessagesForStorage } from '@/utils/messageUtils';
 
 // Define the question type to include multiple choice options
 interface Question {
@@ -31,12 +33,23 @@ const getQuestionText = (question: any): string => {
 const formatMathExpression = (text: string) => {
     if (!text) return text;
     
-    // Handle explicit math delimiters
+    // First replace display math \[ \] with $ $ for consistent processing
+    text = text.replace(/\\\[(.*?)\\\]/g, '$$$1$');
+    
+    // Also replace $$ $$ with $ $ if present
+    text = text.replace(/\$\$(.*?)\$\$/g, '$$$1$');
+    
+    // Handle all math delimiters now standardized to $ $
     if (text.includes('$')) {
         return text.split(/(\$.*?\$)/).map((part, index) => {
             if (part.startsWith('$') && part.endsWith('$')) {
                 const mathExpression = part.slice(1, -1);
-                return <InlineMath key={index} math={mathExpression} />;
+                try {
+                    return <InlineMath key={index} math={mathExpression} />;
+                } catch (e) {
+                    console.error('LaTeX parsing error:', e);
+                    return part; // Fallback to raw text if parsing fails
+                }
             }
             return part;
         });
@@ -53,7 +66,14 @@ const formatTime = (seconds: number): string => {
 };
 
 export default function SinglePage() {
-    const { completeLesson, lessonQuestionIndex, currentStage, userId } = useFlow();
+    const router = useRouter();
+    const { 
+        completeLesson, 
+        lessonQuestionIndex, 
+        currentStage, 
+        userId,
+        saveSessionData  // Use this instead of SessionService.createSession
+    } = useFlow();
     
     // Debug line to see what's happening
     console.log("SINGLE PAGE - Current stage:", currentStage, "Question index:", lessonQuestionIndex);
@@ -73,8 +93,16 @@ export default function SinglePage() {
     const [evaluationComplete, setEvaluationComplete] = useState(false);
     const [userHasScrolled, setUserHasScrolled] = useState(false);
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
-    const [currentModel] = useState(AI_MODELS.CLAUDE_HAIKU.id);
+    const [currentModel] = useState(AI_MODELS.GPT4O.id);
     const [sessionStartTime] = useState<Date>(new Date());
+    const [lastMessageTime, setLastMessageTime] = useState(Date.now());
+    const [wordCount, setWordCount] = useState(0);
+    const [skipTypewriter, setSkipTypewriter] = useState(false);
+    const interventionRef = useRef(false);
+    const wordThreshold = 750; // Match the 750 word threshold from group page
+    const timeThreshold = 30000; // 30 seconds
+    const lastWordCountResetRef = useRef<number | null>(null);
+    const roundEndedRef = useRef(false);
     
     // --- REFS ---
     const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -121,14 +149,14 @@ export default function SinglePage() {
         const tryCallback = () => {
             // Safety timeout to prevent infinite waiting
             if (Date.now() - startTime > maxDelay) {
-                console.warn('Timeout waiting for typing to complete, proceeding anyway');
+                console.log('Max delay reached, forcing callback');
                 callback();
                 return;
             }
 
             if (typingMessageIds.length > 0) {
-                console.log(`Messages still typing: ${typingMessageIds.join(', ')}, delaying action`);
-                setTimeout(tryCallback, 800);
+                console.log('Typing in progress, waiting...');
+                setTimeout(tryCallback, 100);
                 return;
             }
 
@@ -148,7 +176,7 @@ export default function SinglePage() {
     
     // Handle key presses in the chat input
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && input.trim() && isQuestioningEnabled) {
             e.preventDefault();
             handleUserQuestion();
         }
@@ -166,7 +194,7 @@ export default function SinglePage() {
     };
 
     // Update saveSessionData to include correctness
-    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+    const saveLessonData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
             // Calculate session duration in seconds
             const endTime = new Date();
@@ -179,8 +207,11 @@ export default function SinglePage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            await SessionService.createSession({
-                userId,
+            // Clean messages for database storage
+            const cleanedMessages = prepareMessagesForStorage(messages);
+            
+            // Instead of calling the API directly, save to context
+            saveSessionData({
                 questionId: lessonQuestionIndex,
                 questionText,
                 startTime: sessionStartTime,
@@ -188,15 +219,52 @@ export default function SinglePage() {
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
                 scratchboardContent,
-                messages,
+                messages: cleanedMessages,
                 isCorrect,
                 timeoutOccurred: isTimeout
             });
             
-            console.log('Session data saved successfully');
+            console.log('Session data saved to flow context');
         } catch (error) {
             console.error('Error saving session data:', error);
         }
+    };
+
+    // Function to handle timer expiration
+    const handleTimeExpired = () => {
+        console.log('Time expired - auto-submitting current answer');
+
+        // Prevent further edits
+        setIsQuestioningEnabled(false);
+        setHasSubmittedAnswer(true);
+
+        // Use current values, even if empty
+        const submissionText = finalAnswer.trim() || "No answer provided";
+
+        // Create a system message about timeout
+        const timeoutMessage: Message = {
+            id: getUniqueMessageId(),
+            sender: 'system',
+            text: "Time's up! Your answer has been submitted.",
+            timestamp: new Date().toISOString()
+        };
+
+        // Create a user message with the partial answer
+        const userTimeoutMessage: Message = {
+            id: getUniqueMessageId(),
+            sender: 'user',
+            text: `My partial answer: ${submissionText}\n\nMy work so far:\n${scratchboardContent}`,
+            timestamp: new Date().toISOString()
+        };
+
+        // Add messages to the conversation
+        setMessages([timeoutMessage, userTimeoutMessage]);
+
+        // Save session data with timeout flag
+        saveLessonData(submissionText, true);
+
+        // Start conversation with Bob about the partial answer
+        startConversation(currentQuestion!, submissionText, scratchboardContent);
     };
 
     // --- EFFECT HOOKS ---
@@ -210,8 +278,8 @@ export default function SinglePage() {
             
             // Update localStorage if needed to match the current page
             if (storedStage !== 'lesson') {
-                console.log('Updating localStorage to match current page (lesson)');
-                localStorage.setItem('currentStage', 'lesson');
+                console.log('Redirecting to proper stage...');
+                // router.push('/'); // Optionally redirect
             }
         }
     }, [currentStage]);
@@ -221,18 +289,25 @@ export default function SinglePage() {
         const fetchQuestion = async () => {
             try {
                 const response = await fetch('/questions.json');
-                if (response.ok) {
-                    const data = await response.json();
-                    // Use lessonQuestionIndex to select the question
-                    if (data.questions && data.questions.length > lessonQuestionIndex) {
-                        setCurrentQuestion(data.questions[lessonQuestionIndex]);
-                        console.log("Loaded question:", data.questions[lessonQuestionIndex]);
-                    } else {
-                        console.error("Question index out of bounds:", lessonQuestionIndex);
+                const data = await response.json();
+                
+                if (data && data.questions && 
+                    typeof lessonQuestionIndex === 'number' && 
+                    lessonQuestionIndex >= 0 && 
+                    lessonQuestionIndex < data.questions.length) {
+                    
+                    setCurrentQuestion(data.questions[lessonQuestionIndex]);
+                } else {
+                    // Fallback to first question or show error
+                    console.error('Invalid lesson question index or no questions found:', 
+                        { lessonQuestionIndex, dataLength: data?.questions?.length });
+                    
+                    if (data && data.questions && data.questions.length > 0) {
+                        setCurrentQuestion(data.questions[0]);
                     }
                 }
             } catch (error) {
-                console.error("Error fetching question:", error);
+                console.error('Error loading questions:', error);
             }
         };
         
@@ -241,210 +316,212 @@ export default function SinglePage() {
     
     // Timer functionality
     useEffect(() => {
-        if (timeLeft > 0 && !hasSubmittedAnswer) {
-            const timerId = setTimeout(() => {
-                setTimeLeft(timeLeft - 1);
-            }, 1000);
-            return () => clearTimeout(timerId);
-        } else if (timeLeft === 0 && !hasSubmittedAnswer) {
-            // Time's up, handle like a submission with no answer
-            handleTimeExpired();
+        if (!currentQuestion) return;
+
+        if (!hasSubmittedAnswer) {
+            // Pre-submission timer logic
+            if (timeLeft <= 0) {
+                handleTimeExpired();
+                return;
+            }
+        } else {
+            // Post-submission discussion timer
+            if (timeLeft <= 0) {
+                // Time to move to next page
+                console.log('Discussion time expired - navigating to next page');
+                
+                // Show message about moving on
+                const timeUpMessageId = getUniqueMessageId();
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        id: timeUpMessageId,
+                        sender: 'system',
+                        text: "Time's up! Moving to the next question...",
+                        timestamp: new Date().toISOString()
+                    }
+                ]);
+                
+                // IMPORTANT FIX: Mark the round as ended to prevent further timer decrements
+                roundEndedRef.current = true;
+                
+                // Disable user interaction during transition
+                setIsQuestioningEnabled(false);
+                
+                // Navigate after a longer delay to ensure state updates are complete
+                setTimeout(() => {
+                    console.log('Completing lesson and transitioning to break...');
+                    completeLesson();
+                }, 3000); // Increase delay from 2000 to 3000ms
+                
+                return;
+            }
         }
-    }, [timeLeft, hasSubmittedAnswer]);
+
+        // Continue with normal timer logic
+        if (roundEndedRef.current) return;
+
+        const timerId = setTimeout(() => {
+            setTimeLeft((prevTime) => prevTime - 1);
+        }, 1000);
+
+        return () => clearTimeout(timerId);
+    }, [timeLeft, hasSubmittedAnswer, currentQuestion]);
     
+    // Add useEffect to track message changes for interventions
+    useEffect(() => {
+        if (messages.length > 0) {
+            setLastMessageTime(Date.now());
+        }
+    }, [messages]);
+
+    // Add this effect to update word count when messages change
+    useEffect(() => {
+        // Only count after submission and when there are no typing animations
+        if (hasSubmittedAnswer && typingMessageIds.length === 0) {
+            // Skip recalculation if we just reset the word count OR if intervention is in progress
+            const now = Date.now();
+            if (
+                // Don't recalculate during active interventions
+                interventionRef.current ||
+                // Don't recalculate too soon after a reset
+                (lastWordCountResetRef.current && now - lastWordCountResetRef.current < 5000)
+            ) {
+                console.log("Skipping word count recalculation: intervention active or recent reset");
+                return;
+            }
+
+            const newWordCount = countWordsInMessages(messages);
+            console.log(`Recalculating total conversation word count: ${newWordCount}`);
+            setWordCount(newWordCount);
+        }
+    }, [messages, typingMessageIds, hasSubmittedAnswer]);
+
+    // Add useEffect to periodically check for intervention triggers
+    useEffect(() => {
+        if (!hasSubmittedAnswer || !isQuestioningEnabled) return;
+        
+        const intervalId = setInterval(checkInterventionTriggers, 5000);
+        return () => clearInterval(intervalId);
+    }, [hasSubmittedAnswer, isQuestioningEnabled, messages, wordCount, lastMessageTime]);
+
     // --- AI INTERACTION FUNCTIONS ---
     // Update Bob's system prompt
     const bobPrompt = `You are a supportive math tutor. Your role is to guide the student toward a correct and deep understanding of the solution process, rather than simply providing the final answer.
 Context & Instructions:
 1. Maintain a friendly, encouraging tone.
-2. In your first response, indicate whether the student's answer is correct or incorrect.
-3. Follow that with an explanation or helpful feedback.
-4. End this initial response by asking a question to check if your explanation is clear.
-5. Acknowledge correct reasoning or partial steps.
-6. Ask clarifying or probing questions as needed.
-7. Provide step-by-step hints if needed, but avoid giving the full solution immediately.
-8. Emphasize that mistakes are normal and useful for learning.
-9. Encourage the student to reflect on their approach and restate the solution in their own words.
-Parameters:
-- Question: {question}
-- Student answer: {student_answer}
-- Scratch pad (optional): {scratch_pad}
-Your goal is to:
-- Begin by stating if the student's answer is correct or not.
-- Provide a brief explanation or guidance.
-- End with a question like "Does this make sense?" or "Is that clear?"`;
+2. Point out both correct aspects and areas for improvement in student work.
+3. Ask guiding questions that lead the student to discover key insights.
+4. Provide clear explanations with step-by-step reasoning.
+5. When highlighting an error, explain why it is incorrect and suggest a better approach.
+6. Balance between giving too much help and too little - aim to develop student independence.
 
-    // Modify startConversation function to work with student-first approach
-    const startConversation = (question: Question, studentAnswer: string, scratchpad: string) => {
-        const bobIntroId = getUniqueMessageId();
+CRITICAL MATH FORMATTING INSTRUCTIONS:
+1. ALL mathematical expressions MUST be enclosed in LaTeX delimiters with single $ symbols
+2. NEVER write math expressions without proper LaTeX formatting
+3. Examples of proper formatting:
+   - Use $2^3$ instead of 2³ or 2^3
+   - Use $\\frac{1}{2}$ instead of 1/2
+   - Use $\\sqrt{x}$ instead of √x
+   - Use $\\times$ instead of × or x
+   - Use $5 \\cdot 3$ for multiplication instead of 5*3
+4. Never use double $$ delimiters
+5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+6. Format operators properly: $+$, $-$, $\\div$`;
+
+    // Add function to count words in messages
+    const countWordsInMessages = (messages: Message[]): number => {
+        let totalWords = 0;
         
-        const bobIntroMessage = {
-            id: bobIntroId,
-            sender: 'ai',
-            text: "I've reviewed your answer. Let me provide some feedback...",
-            agentId: 'bob',
-            timestamp: new Date().toISOString(),
-            onComplete: () => {
-                generateInitialFeedback(question, studentAnswer, scratchpad);
+        // Count words from ALL messages, not just user messages
+        messages.forEach((message) => {
+            if (typeof message.text === 'string' && message.text !== '...') {
+                const words = message.text.split(/\s+/).filter(word => word.length > 0);
+                totalWords += words.length;
             }
-        };
+        });
         
-        setMessages([bobIntroMessage]);
-        setTypingMessageIds([bobIntroId]);
+        console.log(`Total conversation word count: ${totalWords}`);
+        return totalWords;
     };
-    
-    // Add new function to generate initial feedback
-    const generateInitialFeedback = async (question: Question, studentAnswer: string, scratchpad: string) => {
-        const messageId = getUniqueMessageId();
+
+    // Update startConversation to ensure user answer is first and reset timer
+    const startConversation = (question: Question, studentAnswer: string, scratchpad: string) => {
+        // Reset discussion timer to 2 minutes
+        setTimeLeft(120);
+        roundEndedRef.current = false;
         
-        // Add placeholder message
-        const feedbackMessage = {
-            id: messageId,
-            sender: 'ai',
-            text: 'Analyzing your answer...',
-            agentId: 'bob',
-            timestamp: new Date().toISOString()
-        };
-        
-        setMessages(prev => [...prev, feedbackMessage]);
-        setTypingMessageIds(prev => [...prev, messageId]);
-        
-        try {
-            // Convert question to string
-            const questionText = getQuestionText(question);
-            
-            // Generate Bob's feedback
-            const response = await aiService.generateResponse(
-                [
-                    {
-                        id: 1,
-                        sender: 'user',
-                        text: `Question: ${questionText}\nStudent answer: ${studentAnswer}\nScratch pad: ${scratchpad}`
-                    }
-                ],
-                {
-                    systemPrompt: bobPrompt.replace('{question}', questionText)
-                                          .replace('{student_answer}', studentAnswer)
-                                          .replace('{scratch_pad}', scratchpad),
-                    model: currentModel
-                }
-            );
-            
-            // Update message with response
-            setMessages(prev =>
-                prev.map(msg =>
-                    msg.id === messageId
-                        ? { ...msg, text: response, timestamp: new Date().toISOString() }
-                        : msg
-                )
-            );
-        } catch (error) {
-            console.error("Error generating initial feedback:", error);
-            // Handle error
-            setMessages(prev =>
-                prev.map(msg =>
-                    msg.id === messageId
-                        ? { 
-                            ...msg, 
-                            text: "I'm having trouble analyzing your answer right now. Let's discuss your approach in more detail.", 
-                            timestamp: new Date().toISOString() 
-                          }
-                        : msg
-                )
-            );
-        }
-    };
-    
-    // Add new function to handle when time expires
-    const handleTimeExpired = () => {
-        // Record time expiration
-        const now = new Date().toISOString();
-        
-        // Create message about not submitting an answer
-        const userTimeoutMessage: Message = {
+        // Create user answer message
+        const userAnswerMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
-            text: `I didn't submit an answer before the time expired.\n\nMy incomplete work:\n${scratchboardContent}`,
-            timestamp: now
-        };
-        
-        // Update UI states
-        setMessages([userTimeoutMessage]);
-        setHasSubmittedAnswer(true); // Show the chat interface
-        
-        // Save session data with timeout flag
-        saveSessionData("No answer specified", true);
-
-        // Start conversation with Bob, informing him the user didn't provide an answer
-        startTimeoutConversation(currentQuestion!, scratchboardContent);
-    };
-    
-    // Add function to start conversation when time expires
-    const startTimeoutConversation = (question: Question, scratchpad: string) => {
-        const bobIntroId = getUniqueMessageId();
-        
-        const bobIntroMessage = {
-            id: bobIntroId,
-            sender: 'ai',
-            text: "I see you didn't have time to complete your answer. That's okay, let's work through this together...",
-            agentId: 'bob',
-            timestamp: new Date().toISOString(),
-            onComplete: () => {
-                generateTimeoutFeedback(question, scratchpad);
-            }
-        };
-        
-        setMessages(prev => [...prev, bobIntroMessage]);
-        setTypingMessageIds([bobIntroId]);
-    };
-
-    // Add function to generate feedback when time expires
-    const generateTimeoutFeedback = async (question: Question, scratchpad: string) => {
-        const messageId = getUniqueMessageId();
-        
-        // Add placeholder message
-        const feedbackMessage = {
-            id: messageId,
-            sender: 'ai',
-            text: 'Analyzing your work...',
-            agentId: 'bob',
+            text: `My final answer is: ${studentAnswer}\n\nMy reasoning:\n${scratchpad}`,
             timestamp: new Date().toISOString()
         };
         
-        setMessages(prev => [...prev, feedbackMessage]);
-        setTypingMessageIds(prev => [...prev, messageId]);
+        // Create Bob's response message
+        const bobId = getUniqueMessageId();
+        const bobMessage = {
+            id: bobId,
+            sender: 'ai',
+            text: '...',
+            agentId: 'bob',
+            timestamp: new Date().toISOString(),
+            onComplete: () => {
+                // Enable questioning after Bob's initial evaluation
+                setIsQuestioningEnabled(true);
+            }
+        };
         
+        // Set messages with user answer first, then Bob's response
+        setMessages([userAnswerMessage, bobMessage]);
+        setTypingMessageIds([bobId]);
+        
+        // Start the timer for discussion phase
+        const discussionTimerId = setInterval(() => {
+            setTimeLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(discussionTimerId);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        
+        // Generate Bob's initial feedback with the new format
+        generateTeacherInitialResponse(bobId, question, studentAnswer, scratchpad);
+    };
+
+    // Function to generate teacher's initial response with the new format
+    const generateTeacherInitialResponse = async (
+        messageId: number,
+        question: Question,
+        studentAnswer: string,
+        scratchpad: string
+    ) => {
         try {
-            // Convert question to string
             const questionText = getQuestionText(question);
+            const correctAnswer = question.correctAnswer || question.answer || 'not provided';
             
-            // Generate Bob's feedback
+            // Build prompt for teacher's response
+            let promptText = `The current problem is: ${questionText}\n\n`;
+            promptText += `The correct answer is: ${correctAnswer}\n\n`;
+            promptText += `The student's answer was: ${studentAnswer}\n\n`;
+            promptText += `The student's work: ${scratchpad}\n\n`;
+            
+            promptText += `As the teacher (Bob), provide your response in this format:
+1. Start with "The correct answer is [correct answer]."
+2. Explain the proper solution approach in a clear, step-by-step manner
+3. Provide specific feedback on the student's approach and where they went right or wrong
+4. End with a question like "Any questions or confusions about this problem?" to encourage further discussion
+5. Use LaTeX notation enclosed in $ symbols for all mathematical expressions`;
+            
+            // Generate response from AI service
             const response = await aiService.generateResponse(
-                [
-                    {
-                        id: 1,
-                        sender: 'user',
-                        text: `Question: ${questionText}\nStudent didn't submit an answer before time expired.\nTheir incomplete work: ${scratchpad}`
-                    }
-                ],
+                [{ id: 1, sender: 'user', text: promptText }],
                 {
-                    systemPrompt: `You are a supportive math tutor. The student ran out of time and didn't submit a final answer.
-                        Context & Instructions:
-                        1. Maintain a friendly, encouraging tone.
-                        2. Acknowledge that running out of time is common and not a problem.
-                        3. Review what they did manage to work on in their scratchpad.
-                        4. Provide a clear step-by-step explanation of how to solve the problem.
-                        5. Ask if they have any questions about the solution.
-                        6. Emphasize the key concepts needed for this type of problem.
-                        
-                        Question: ${questionText}
-                        Student scratchpad: ${scratchpad}
-                        
-                        Your goal is to:
-                        - Be encouraging and supportive
-                        - Explain the full solution clearly
-                        - Highlight key concepts they should understand`,
-                    model: currentModel
+                    systemPrompt: bobPrompt,
+                    model: 'gpt-4o-2024-08-06'
                 }
             );
             
@@ -456,27 +533,266 @@ Your goal is to:
                         : msg
                 )
             );
+            
+            // ADD THIS LINE: Add to typingMessageIds for animation
+            setTypingMessageIds(prev => [...prev, messageId]);
+            
         } catch (error) {
-            console.error("Error generating timeout feedback:", error);
-            // Handle error
+            console.error("Error generating teacher's initial response:", error);
+            
+            // Fallback response
+            const fallbackText = `The correct answer is ${question.correctAnswer || question.answer || '[correct answer]'}. Let me explain how to solve this step by step... [Error generating complete response]. Any questions or confusions about this problem?`;
+            
             setMessages(prev =>
                 prev.map(msg =>
                     msg.id === messageId
-                        ? { 
-                            ...msg, 
-                            text: "Let me help you with this problem. It looks like you ran out of time, which happens to everyone. Let's walk through the solution together.", 
-                            timestamp: new Date().toISOString() 
-                          }
+                        ? { ...msg, text: fallbackText, timestamp: new Date().toISOString() }
                         : msg
                 )
             );
+            
+            // ALSO ADD HERE: Add to typingMessageIds in error case
+            setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
-    
-    // Function to handle user asking a question to Bob
-    const handleUserQuestion = () => {
-        if (!input.trim() || typingMessageIds.length > 0) return;
 
+    // Add functions for Bob-only intervention
+    const checkInterventionTriggers = () => {
+        // Skip if another intervention is already in progress
+        if (interventionRef.current) {
+            console.log("Intervention already in progress, skipping check");
+            return;
+        }
+        
+        const now = Date.now();
+        const timeSinceLastMessage = now - lastMessageTime;
+        
+        console.log(`Checking triggers - Words: ${wordCount}/${wordThreshold}, Time: ${Math.round(timeSinceLastMessage/1000)}s/${Math.round(timeThreshold/1000)}s`);
+        
+        // Word count trigger (750 words)
+        if (wordCount >= wordThreshold) {
+            console.log("Word count threshold reached, triggering feedback intervention");
+            interventionRef.current = true;
+            
+            // IMPORTANT: Set this first before triggering the intervention
+            lastWordCountResetRef.current = Date.now();
+            
+            // Reset word count after triggering AND record the reset time
+            setWordCount(0);
+            
+            // Trigger Bob's feedback
+            triggerBobFeedback();
+            return;
+        }
+        
+        // Time-based trigger remains unchanged
+        if (timeSinceLastMessage >= timeThreshold) {
+            console.log("Time threshold reached, triggering brainstorm intervention");
+            interventionRef.current = true;
+            setLastMessageTime(now);
+            
+            triggerBobBrainstorm();
+        }
+    };
+
+    // Function to trigger Bob's feedback after word count threshold
+    const triggerBobFeedback = () => {
+        const bobId = getUniqueMessageId();
+        
+        setMessages(prev => [
+            ...prev,
+            {
+                id: bobId,
+                sender: 'ai',
+                text: '...',
+                agentId: 'bob',
+                timestamp: new Date().toISOString(),
+                onComplete: () => {
+                    // CRITICAL FIX: Add a timeout before clearing the intervention flag
+                    setTimeout(() => {
+                        // Verify the word count is at 0 before clearing intervention flag
+                        console.log(`Intervention complete. Current word count: ${wordCount}`);
+                        
+                        // For safety, make sure word count is properly reset
+                        setWordCount(0);
+                        
+                        // Update the timestamp after intervention is truly complete
+                        lastWordCountResetRef.current = Date.now();
+                        
+                        // Finally clear the intervention flag
+                        interventionRef.current = false;
+                        
+                        console.log("Intervention complete, system ready for next threshold check");
+                    }, 1000); // Add a 1 second delay
+                }
+            }
+        ]);
+        
+        generateBobFeedback(bobId, messages);
+    };
+
+    // Word Count Intervention - Feedback on discussion
+    const generateBobFeedback = async (messageId: number, contextMessages: Message[]) => {
+        try {
+            // Format conversation history
+            const messagesSummary = contextMessages.map(msg => {
+                return `${msg.sender === 'user' ? 'Student' : 'Bob'}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+            }).join('\n\n');
+            
+            // Build prompt for Bob's feedback - FOCUSED ON CONVERSATION REVIEW
+            let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
+            promptText += `Here's the conversation so far:\n${messagesSummary}\n\n`;
+            promptText += `As the teacher (Bob), provide DETAILED FEEDBACK on the discussion so far. Review what has been discussed and identify both strengths and areas for improvement in the student's understanding.
+
+Specifically:
+1. Highlight one correct idea from the student
+2. Identify one misunderstanding or area that needs clarification
+3. Suggest one strategy to deepen understanding of the problem
+4. End with a specific question that prompts the student to reflect on their approach
+
+Use LaTeX notation with $ for math expressions.`;
+            
+            // Generate response
+            const response = await aiService.generateResponse(
+                [{ id: 1, sender: 'user', text: promptText }],
+                {
+                    systemPrompt: bobPrompt,
+                    model: 'gpt-4o-2024-08-06'
+                }
+            );
+            
+            // Update message
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: response,
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+            
+            // Add to typing IDs
+            setTypingMessageIds(prev => [...prev, messageId]);
+        } catch (error) {
+            console.error("Error generating Bob's feedback:", error);
+            
+            // Fallback response
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: "I notice there are a few things we should clarify in our discussion. Let me highlight some key points... [Error generating complete response]. Does that help clarify things?",
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+            
+            // Add to typing IDs for animation
+            setTypingMessageIds(prev => [...prev, messageId]);
+        }
+    };
+
+    // Function to trigger Bob's brainstorm after inactivity
+    const triggerBobBrainstorm = () => {
+        const bobId = getUniqueMessageId();
+        
+        setMessages(prev => [
+            ...prev,
+            {
+                id: bobId,
+                sender: 'ai',
+                text: '...',
+                agentId: 'bob',
+                timestamp: new Date().toISOString(),
+                onComplete: () => {
+                    interventionRef.current = false;
+                }
+            }
+        ]);
+        
+        generateBobBrainstorm(bobId);
+    };
+
+    // Time-Based Intervention - Brief prompt to restart discussion
+    const generateBobBrainstorm = async (messageId: number) => {
+        try {
+            const questionText = getQuestionText(currentQuestion);
+            
+            // Build prompt for Bob's brainstorm - SHORTER and more DIRECT
+            let promptText = `The current problem is: ${questionText}\n\n`;
+            promptText += `The discussion has paused. As the teacher (Bob), BRIEFLY introduce ONE new insight or approach to prompt the student to engage with the problem.
+
+Keep your response to 3 sentences maximum and end with a specific, direct question to restart the conversation.
+
+Use LaTeX notation with $ for any math expressions.`;
+            
+            // Generate response
+            const response = await aiService.generateResponse(
+                [{ id: 1, sender: 'user', text: promptText }],
+                {
+                    systemPrompt: bobPrompt,
+                    model: 'gpt-4o-2024-08-06'
+                }
+            );
+            
+            // Update message
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: response,
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+            
+            // Add to typing IDs
+            setTypingMessageIds(prev => [...prev, messageId]);
+        } catch (error) {
+            console.error("Error generating Bob's brainstorm:", error);
+            
+            // Fallback response
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: "I just had a thought that might help you understand this problem better... [Error generating complete response]. Does that give you a different perspective?",
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+            
+            // Also add to typingMessageIds in error case
+            setTypingMessageIds(prev => [...prev, messageId]);
+        }
+    };
+
+    // Update handleUserQuestion to allow interrupting animations
+    const handleUserQuestion = () => {
+        if (!input.trim()) return;
+
+        // Skip any ongoing typewriter animations and complete them immediately
+        if (typingMessageIds.length > 0) {
+            // Set skip flag to true to make all current typing animations complete immediately
+            setSkipTypewriter(true);
+            
+            // Wait a tiny bit for the skip to process, then continue with sending the message
+            setTimeout(() => {
+                // Clear typing message IDs to immediately finish all animations
+                setTypingMessageIds([]);
+                
+                // Continue with sending the user's message
+                sendUserMessage();
+            }, 50);
+        } else {
+            // No animations in progress, send message directly
+            sendUserMessage();
+        }
+    };
+
+    // Add this helper function to handle the actual message sending
+    const sendUserMessage = () => {
         const userMessageId = getUniqueMessageId();
         const bobResponseId = getUniqueMessageId();
 
@@ -494,7 +810,10 @@ Your goal is to:
             sender: 'ai',
             agentId: 'bob',
             text: '...',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            onComplete: () => {
+                // Any actions to take when Bob's response is complete
+            }
         };
 
         // Update the message list
@@ -502,65 +821,82 @@ Your goal is to:
         setTypingMessageIds(prev => [...prev, bobResponseId]);
         setInput(''); // Clear input field
 
+        // Reset intervention flags when user asks a question
+        interventionRef.current = false;
+        setLastMessageTime(Date.now());
+
         // Generate Bob's response
-        setTimeout(() => generateBobResponse(bobResponseId, input), 100);
+        generateBobResponse(bobResponseId, input);
+        
+        // Reset skip flag after the new message is sent
+        setTimeout(() => setSkipTypewriter(false), 50);
     };
     
     // Function to generate Bob's response to a user question
     const generateBobResponse = async (messageId: number, userQuestion: string) => {
         try {
             // Format all previous messages for context
-            const formattedMessages = messages.map(msg => ({
-                id: msg.id,
-                sender: msg.sender,
-                text: typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)
-            }));
-
-            // Add the latest user question
-            formattedMessages.push({
-                id: formattedMessages.length + 1,
-                sender: 'user',
-                text: userQuestion
-            });
-
-            // Get the final answer from the messages if it exists
-            const userFinalAnswer = messages.find(msg => 
-                msg.sender === 'user' && 
-                typeof msg.text === 'string' && 
-                msg.text.startsWith('My final answer is:')
-            );
-
-            // Format the question for context
+            const previousMessages = messages.slice(0, -2);            
+            const messagesSummary = previousMessages.map(msg => {
+                const sender = msg.sender === 'user' ? 'Student' : 'Teacher (Bob)';
+                return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+            }).join('\n\n');
+            
+            // Get the question text
             const questionText = getQuestionText(currentQuestion);
+            
+            // Build prompt for Bob's response
+            let promptText = `The current problem is: ${questionText}\n\n`;
+            
+            if (messagesSummary) {
+                promptText += `Here's the conversation so far:\n${messagesSummary}\n\n`;
+            }
+            
+            promptText += `The student just asked: "${userQuestion}"\n\n`;
+            promptText += `As the teacher (Bob), respond to the student's question. Be helpful, supportive, and clear. 
+Make sure you address their specific question directly. Provide additional insights if relevant, but stay focused on what they're asking.
+End with a question to encourage further thinking or check their understanding.
+Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
             
             // Generate response from AI service
             const response = await aiService.generateResponse(
-                formattedMessages,
+                [{ id: 1, sender: 'user', text: promptText }],
                 {
-                    systemPrompt: `You are Bob, a supportive math tutor helping a student with the problem: ${questionText}
-                    ${userFinalAnswer ? `The student's answer was: ${userFinalAnswer.text}` : ''}
-                    Respond to their question in a clear, helpful way. Give guidance but avoid giving the full solution immediately.
-                    Use LaTeX notation for math expressions: $...$ format.`,
-                    model: currentModel
+                    systemPrompt: bobPrompt,
+                    model: 'gpt-4o-2024-08-06'
                 }
             );
-
-            // Update the message with the response
-            setMessages(prev => prev.map(msg => 
-                msg.id === messageId 
-                    ? { ...msg, text: response, timestamp: new Date().toISOString() } 
+            
+            // Update message with response
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: response,
+                        timestamp: new Date().toISOString()
+                      }
                     : msg
             ));
-
+            
+            // Add to typing message IDs
+            setTypingMessageIds(prev => [...prev, messageId]);
+            
         } catch (error) {
             console.error("Error generating Bob's response:", error);
             
-            // Provide a fallback response
-            setMessages(prev => prev.map(msg => 
-                msg.id === messageId 
-                    ? { ...msg, text: "I'm having trouble processing your question. Could you rephrase it?", timestamp: new Date().toISOString() } 
+            // Fallback response
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: "I'm considering your question... [Error generating complete response]. Can you clarify what you're trying to understand?",
+                        timestamp: new Date().toISOString()
+                      }
                     : msg
             ));
+            
+            // Also add to typingMessageIds in error case
+            setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
     
@@ -671,7 +1007,7 @@ Your goal is to:
             setHasSubmittedAnswer(true); // Mark that the answer has been submitted
             
             // Save session data
-            saveSessionData(submissionText, false);
+            saveLessonData(submissionText, false);
 
             // Start conversation with Bob after submission
             startConversation(
@@ -681,7 +1017,82 @@ Your goal is to:
             );
         });
     };
-    
+
+    // Function to render chat messages with typewriter effect
+    const renderChatMessages = () => {
+        return (
+            <div 
+                ref={chatContainerRef}
+                className="flex-1 bg-white bg-opacity-10 rounded-md overflow-y-auto p-2 chat-messages scrollbar"
+                onScroll={handleScroll}
+            >
+                {messages.map((msg) => (
+                    <div
+                        key={msg.id}
+                        className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                        {msg.sender === 'ai' && (
+                            <div className="mr-2 flex-shrink-0">
+                                <Image
+                                    src="/tutor_avatar.svg"
+                                    alt="Bob (Teacher)"
+                                    width={40}
+                                    height={40}
+                                    className="rounded-full border-2 border-white"
+                                />
+                            </div>
+                        )}
+
+                        <div
+                            className={`max-w-[75%] rounded-lg p-3 chat-message-bubble ${
+                                msg.sender === 'user'
+                                    ? 'bg-blue-600 text-white'
+                                    : msg.sender === 'system'
+                                    ? 'bg-purple-700 text-white'
+                                    : 'bg-white bg-opacity-10 text-white'
+                            }`}
+                        >
+                            {msg.sender === 'ai' && (
+                                <div className="text-sm text-gray-300 mb-1 font-bold">
+                                    Bob (Teacher)
+                                </div>
+                            )}
+
+                            {typingMessageIds.includes(msg.id) ? (
+                                <TypewriterTextWrapper
+                                    key={`typewriter-message-${msg.id}`}
+                                    text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                    speed={20}
+                                    messageId={msg.id}
+                                    skip={skipTypewriter}
+                                    onTypingProgress={() => {
+                                        if (!userHasScrolled) {
+                                            scrollToBottom();
+                                        }
+                                    }}
+                                    onTypingComplete={() => {
+                                        setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
+                                        if (!userHasScrolled) {
+                                            scrollToBottom();
+                                        }
+                                        if (msg.onComplete) {
+                                            msg.onComplete();
+                                        }
+                                    }}
+                                    formatMath={true}
+                                />
+                            ) : (
+                                <div className="whitespace-pre-wrap break-words text-message">
+                                    {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
     // If question hasn't loaded yet
     if (!currentQuestion) {
         return (
@@ -693,218 +1104,157 @@ Your goal is to:
     
     // --- RENDER COMPONENT ---
     return (
-        <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden">
-            {/* LEFT PANEL - Problem, Final Answer, Scratchboard */}
-            <div className={`${hasSubmittedAnswer ? 'w-1/2 pr-2' : 'w-full'} flex flex-col h-full overflow-hidden`}>
-                {/* Problem Display with Timer inside */}
-                {currentQuestion && (
-                    <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
-                        <div className="flex justify-between items-start mb-2">
-                            <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                            <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
-                                Time: {formatTime(timeLeft)}
-                            </div>
-                        </div>
-                        <p className="text-white text-lg">{formatMathExpression(currentQuestion.question)}</p>
-                    </div>
-                )}
-
-                {/* Final Answer - Now ALWAYS visible like in MultiPage */}
-                <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
-                    <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
-                    <div className="flex flex-col space-y-3">
-                        {currentQuestion && currentQuestion.options ? (
-                            // Multiple choice final submission
-                            <div className="grid grid-cols-1 gap-3 mb-4">
-                                {Object.entries(currentQuestion.options).map(([key, value]) => (
-                                    <button
-                                        key={key}
-                                        onClick={() => handleOptionSelect(key)}
-                                        className={`p-3 rounded-md text-left flex items-center ${
-                                            selectedOption === key 
-                                            ? 'bg-purple-700 border-2 border-purple-400' 
-                                            : 'bg-white bg-opacity-10 border border-gray-600 hover:bg-opacity-20'
-                                        } text-white`}
-                                    >
-                                        <span className="font-bold mr-2">{key}:</span> 
-                                        <span>{formatMathExpression(value)}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            // Free text input
-                            <input
-                                type="text"
-                                value={finalAnswer}
-                                onChange={(e) => setFinalAnswer(e.target.value)}
-                                placeholder="Enter your final answer here..."
-                                className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
-                            />
-                        )}
-                        
-                        {/* Submit button - Only show if not submitted yet */}
-                        {!hasSubmittedAnswer && (
-                            <button
-                                onClick={handleSend}
-                                disabled={!scratchboardContent.trim() || typingMessageIds.length > 0}
-                                className={`px-4 py-3 rounded-md text-lg font-medium ${
-                                    scratchboardContent.trim() && typingMessageIds.length === 0
-                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                }`}
-                            >
-                                Submit Final Answer
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {/* Scratchboard - Below final answer with matching styling */}
-                <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
-                    <div className="flex justify-between mb-2">
-                        <h3 className="text-white font-semibold">Rough Work (Required)</h3>
-                    </div>
-                    <textarea
-                        value={scratchboardContent}
-                        onChange={(e) => setScratchboardContent(e.target.value)}
-                        className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
-                        placeholder="Show your work here... (required for submission)"
-                        readOnly={hasSubmittedAnswer} // Make read-only after submission
-                    />
-                </div>
-            </div>
-
-            {/* RIGHT PANEL - Chat (only shown after submission) */}
-            {hasSubmittedAnswer && (
-                <div className="w-1/2 pl-2 flex flex-col h-full">
-                    <div className="flex-1 bg-white bg-opacity-10 rounded-md flex flex-col overflow-hidden">
-                        {/* Agent info (just Bob) - Added to match MultiPage */}
-                        <div className="bg-black bg-opacity-30 p-2">
-                            <div className="flex space-x-3">
-                                <div className="flex items-center">
-                                    <Image
-                                        src="/bob_avatar.svg"
-                                        alt="Bob"
-                                        width={40}
-                                        height={40}
-                                        className="rounded-full border-2 border-white"
-                                    />
-                                    <span className="text-xs text-white ml-2">Bob</span>
+        <FlowProtection requiredStage="lesson">
+            <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden fixed inset-0">
+                {/* LEFT PANEL - Problem, Final Answer, Scratchboard */}
+                <div className={`${hasSubmittedAnswer ? 'w-1/2 pr-2' : 'w-full'} flex flex-col h-full overflow-hidden`}>
+                    {/* Problem Display with Timer inside */}
+                    {currentQuestion && (
+                        <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
+                            <div className="flex justify-between items-start mb-2">
+                                <h2 className="text-xl text-white font-semibold">Problem:</h2>
+                                <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                                    Time: {formatTime(timeLeft)}
                                 </div>
                             </div>
+                            <p className="text-white text-lg">{formatMathExpression(currentQuestion.question)}</p>
                         </div>
+                    )}
 
-                        {/* Chat messages - Scrollable */}
-                        <div
-                            className="flex-1 p-4 overflow-y-auto"
-                            ref={chatContainerRef}
-                            onScroll={handleScroll}
-                        >
-                            {messages.map((msg) => (
-                                <div
-                                    key={msg.id}
-                                    className={`mb-4 flex ${
-                                        msg.sender === 'user' ? 'justify-end' : 'justify-start'
-                                    }`}
-                                >
-                                    {msg.sender === 'ai' && (
-                                        <div className="mr-2 flex-shrink-0">
-                                            <Image
-                                                src="/bob_avatar.svg"
-                                                alt="Bob"
-                                                width={40}
-                                                height={40}
-                                                className="rounded-full border-2 border-white"
-                                            />
-                                        </div>
-                                    )}
-
-                                    <div
-                                        className={`max-w-[75%] rounded-lg p-3 ${
-                                            msg.sender === 'user'
-                                                ? 'bg-blue-600 text-white'
-                                                : msg.sender === 'system'
-                                                ? 'bg-purple-700 text-white'
-                                                : 'bg-white bg-opacity-10 text-white'
-                                        }`}
-                                    >
-                                        {msg.sender === 'ai' && (
-                                            <div className="text-sm text-gray-300 mb-1 font-bold">
-                                                Bob
-                                            </div>
-                                        )}
-                                        
-                                        {typingMessageIds.includes(msg.id) ? (
-                                            <TypewriterTextWrapper
-                                                key={`typewriter-message-${msg.id}`}
-                                                text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
-                                                speed={20}
-                                                messageId={msg.id}
-                                                onTypingProgress={() => {
-                                                    if (!userHasScrolled) {
-                                                        scrollToBottom();
-                                                    }
-                                                }}
-                                                onTypingComplete={() => {
-                                                    setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
-                                                    setCompletedMessageIds(prev => [...prev, msg.id]);
-                                                    
-                                                    if (msg.onComplete) {
-                                                        msg.onComplete();
-                                                    }
-                                                    
-                                                    if (!userHasScrolled) {
-                                                        scrollToBottom();
-                                                    }
-                                                }}
-                                                formatMath={true}
-                                            />
-                                        ) : (
-                                            <div className="whitespace-pre-wrap">
-                                                {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
-                                            </div>
-                                        )}
-                                    </div>
+                    {/* Final Answer - Now ALWAYS visible like in MultiPage */}
+                    <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
+                        <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
+                        <div className="flex flex-col space-y-3">
+                            {currentQuestion && currentQuestion.options ? (
+                                // Multiple choice final submission
+                                <div className="grid grid-cols-1 gap-3 mb-4">
+                                    {Object.entries(currentQuestion.options).map(([key, value]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => handleOptionSelect(key)}
+                                            className={`p-3 rounded-md text-left flex items-center ${
+                                                selectedOption === key 
+                                                ? 'bg-purple-700 border-2 border-purple-400' 
+                                                : 'bg-white bg-opacity-10 border border-gray-600 hover:bg-opacity-20'
+                                            } text-white`}
+                                        >
+                                            <span className="font-bold mr-2">{key}:</span> 
+                                            <span>{formatMathExpression(value)}</span>
+                                        </button>
+                                    ))}
                                 </div>
-                            ))}
-                            <div key="messages-end" />
-                        </div>
-
-                        {/* Chat interface footer with input or proceed button */}
-                        <div className="p-3 bg-black bg-opacity-30 flex justify-between items-center">
-                            {/* Left side - Chat input if questioning is enabled */}
-                            <div className={isQuestioningEnabled ? "flex-1 flex space-x-2" : "hidden"}>
+                            ) : (
+                                // Free text input
                                 <input
                                     type="text"
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    placeholder="Ask Bob about the problem..."
-                                    className="flex-1 bg-white bg-opacity-10 text-white border border-gray-700 rounded-md px-3 py-2"
-                                    onKeyDown={handleKeyDown}
+                                    value={finalAnswer}
+                                    onChange={(e) => setFinalAnswer(e.target.value)}
+                                    placeholder="Enter your final answer here..."
+                                    className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
                                 />
+                            )}
+                            
+                            {/* Submit button - Only show if not submitted yet */}
+                            {!hasSubmittedAnswer && (
                                 <button
-                                    onClick={handleUserQuestion}
-                                    disabled={!input.trim() || typingMessageIds.length > 0}
-                                    className={`px-4 py-2 rounded-md ${
-                                        input.trim() && typingMessageIds.length === 0
+                                    onClick={handleSend}
+                                    disabled={!scratchboardContent.trim() || typingMessageIds.length > 0}
+                                    className={`px-4 py-3 rounded-md text-lg font-medium ${
+                                        scratchboardContent.trim() && typingMessageIds.length === 0
                                             ? 'bg-blue-600 hover:bg-blue-700 text-white'
                                             : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                                     }`}
                                 >
-                                    Ask
+                                    Submit Final Answer
                                 </button>
-
-                                <button
-                                    onClick={completeLesson}
-                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md ml-auto"
-                                >
-                                    {isQuestioningEnabled ? "Skip" : "Proceed"}
-                                </button>
-                            </div>
+                            )}
                         </div>
                     </div>
+
+                    {/* Scratchboard - Below final answer with matching styling */}
+                    <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
+                        <div className="flex justify-between mb-2">
+                            <h3 className="text-white font-semibold">Rough Work (Required)</h3>
+                        </div>
+                        <textarea
+                            value={scratchboardContent}
+                            onChange={(e) => setScratchboardContent(e.target.value)}
+                            className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
+                            placeholder="Show your work here... (required for submission)"
+                            readOnly={hasSubmittedAnswer} // Make read-only after submission
+                        />
+                    </div>
                 </div>
-            )}
-        </div>
+
+                {/* RIGHT PANEL - Chat (only shown after submission) */}
+                {hasSubmittedAnswer && (
+                    <div className="chat-container flex-1 flex flex-col h-full overflow-hidden">
+                        {renderChatMessages()}
+
+                        <div className="mt-3 flex items-start gap-2 chat-input">
+                            <textarea
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                disabled={!isQuestioningEnabled}
+                                placeholder={isQuestioningEnabled ? "Ask a question..." : "Please wait..."}
+                                className="flex-1 bg-white bg-opacity-10 border border-gray-700 rounded-md p-3 text-white resize-none h-16"
+                            />
+                            <button
+                                onClick={handleUserQuestion}
+                                disabled={!input.trim() || !isQuestioningEnabled}
+                                className={`px-5 py-3 rounded-md ${
+                                    !input.trim() || !isQuestioningEnabled
+                                        ? 'bg-gray-700 text-gray-400'
+                                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}
+                            >
+                                Send
+                            </button>
+                        </div>
+
+                        {/* Skip Discussion Button */}
+                        {hasSubmittedAnswer && (
+                            <div className="mt-3 w-full">
+                                <button 
+                                    onClick={() => {
+                                        // Show message about skipping
+                                        const skipMessageId = getUniqueMessageId();
+                                        setMessages(prev => [
+                                            ...prev,
+                                            {
+                                                id: skipMessageId,
+                                                sender: 'system',
+                                                text: "Discussion skipped. Moving to the next section...",
+                                                timestamp: new Date().toISOString()
+                                            }
+                                        ]);
+                                        
+                                        // Disable questioning during transition
+                                        setIsQuestioningEnabled(false);
+                                        
+                                        // Mark the round as ended to prevent timer decrements
+                                        roundEndedRef.current = true;
+                                        
+                                        // Save the final message list to the context before navigating
+                                        // Re-save session data with current messages array
+                                        saveLessonData(finalAnswer, false);
+                                        
+                                        // Navigate after a short delay to ensure state updates are complete
+                                        setTimeout(() => {
+                                            console.log('Skipping discussion and transitioning to break...');
+                                            completeLesson();
+                                        }, 1500);
+                                    }}
+                                    className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
+                                >
+                                    Skip Discussion & Continue
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </FlowProtection>
     );
 }

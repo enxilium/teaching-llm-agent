@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useFlow } from '@/context/FlowContext';
-import SessionService from '@/services/SessionService';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
@@ -32,7 +31,7 @@ interface Question {
 }
 
 export default function SoloPage() {
-    const { completeLesson, lessonQuestionIndex, currentStage, userId } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData } = useFlow();
     const [sessionStartTime] = useState<Date>(new Date());
     
     // Ensure user is in the proper flow stage
@@ -92,8 +91,8 @@ export default function SoloPage() {
         return normalizedUserAnswer === normalizedCorrectAnswer;
     };
 
-    // Add this function to save session data
-    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+    // Modified saveSessionData function
+    const saveSessionDataToFlow = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
             // Calculate session duration in seconds
             const endTime = new Date();
@@ -106,8 +105,8 @@ export default function SoloPage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            await SessionService.createSession({
-                userId,
+            // Save to flow context instead of calling SessionService directly
+            saveSessionData({
                 questionId: currentQuestion?.id || 0,
                 questionText,
                 startTime: sessionStartTime,
@@ -115,12 +114,12 @@ export default function SoloPage() {
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
                 scratchboardContent,
-                messages: [],
+                messages: [], // Solo mode has no messages
                 isCorrect,
                 timeoutOccurred: isTimeout
             });
             
-            console.log('Session data saved successfully');
+            console.log('Session data saved to flow context');
         } catch (error) {
             console.error('Error saving session data:', error);
         }
@@ -159,7 +158,7 @@ export default function SoloPage() {
         });
         
         // Save session data
-        saveSessionData(finalAnswer, false);
+        saveSessionDataToFlow(finalAnswer, false);
 
         // After a delay, allow continuing to the next stage
         setTimeout(() => {
@@ -176,7 +175,7 @@ export default function SoloPage() {
     // Auto-submit timeout answer
     const autoSubmitTimeoutAnswer = () => {
         const submissionText = finalAnswer || '';
-        saveSessionData(submissionText, true);
+        saveSessionDataToFlow(submissionText, true);
     };
     
     // If questions haven't loaded yet
