@@ -545,10 +545,6 @@ export default function MultiPage() {
 
             // Log raw messages before cleaning
             console.log(`💾 MULTI [Session Save] Original messages count: ${messages.length}`);
-            if (messages.length > 0) {
-                console.log(`💾 MULTI [Message Sample] First message fields: ${Object.keys(messages[0]).join(', ')}`);
-                console.log(`💾 MULTI [Message Sample] First message text: ${messages[0].text.substring(0, 50)}...`);
-            }
 
             // Clean messages for database storage
             const cleanedMessages = prepareMessagesForStorage(messages);

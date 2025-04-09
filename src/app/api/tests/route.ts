@@ -1,6 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import TestAttempt from '@/models/TestAttempt';
+import mongoose from 'mongoose';
+
+interface Question {
+  questionId: number;
+  question?: string;
+  userAnswer?: string;
+  correctAnswer?: string;
+  isCorrect?: boolean;
+  scratchboardContent?: string;
+}
+
+interface TestData {
+  userId: string;
+  testType: string;
+  score?: number;
+  completedAt?: string | Date;
+  questions?: Question[];
+  submissionId?: string;
+}
+
+interface TestDocument {
+  userId: string;
+  testType: string;
+  score: number;
+  completedAt: Date;
+  questions: Question[];
+  metadata: {
+    submissionId: string;
+    submittedAt: Date;
+  };
+}
 
 export async function POST(request: NextRequest) {
   console.log("⚡ TEST API ENDPOINT CALLED ⚡");
@@ -13,7 +44,7 @@ export async function POST(request: NextRequest) {
     console.log(`Raw test data received (${rawBody.length} bytes)`);
     
     // Parse data with explicit error handling
-    let testData;
+    let testData: TestData;
     try {
       testData = JSON.parse(rawBody);
       console.log(`Parsed test data: type=${testData.testType}, userId=${testData.userId}`);
@@ -33,7 +64,7 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-    } catch (jsonError) {
+    } catch (jsonError: unknown) {
       console.error("Failed to parse test data JSON:", jsonError);
       return NextResponse.json(
         { success: false, error: 'Invalid JSON in request body' }, 
@@ -43,7 +74,7 @@ export async function POST(request: NextRequest) {
     
     // CRITICAL FIX: Create the test document with a direct object literal
     // instead of using the Mongoose model constructor which might be dropping the field
-    const questionsData = Array.isArray(testData.questions) 
+    const questionsData: Question[] = Array.isArray(testData.questions) 
       ? testData.questions.map(q => ({
           questionId: q.questionId,
           question: q.question || '',
@@ -56,11 +87,11 @@ export async function POST(request: NextRequest) {
       : [];
     
     // Create test document by passing a plain JavaScript object
-    const testDocument = {
+    const testDocument: TestDocument = {
       userId: testData.userId,
       testType: testData.testType,
       score: testData.score || 0,
-      completedAt: testData.completedAt || new Date(),
+      completedAt: testData.completedAt ? new Date(testData.completedAt) : new Date(),
       questions: questionsData,
       metadata: {
         submissionId: testData.submissionId || Date.now().toString(),
@@ -104,14 +135,18 @@ export async function POST(request: NextRequest) {
       }
       
       return NextResponse.json({ success: true });
-    } catch (dbError) {
+    } catch (dbError: unknown) {
       console.error("MongoDB save error:", dbError);
-      throw dbError;
+      if (dbError instanceof mongoose.Error) {
+        throw dbError;
+      }
+      throw new Error('Unknown database error');
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error in test submission:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Unknown error' }, 
+      { success: false, error: errorMessage }, 
       { status: 500 }
     );
   }
@@ -125,11 +160,12 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get('userId');
     const testType = searchParams.get('testType');
     
-    let query = {};
+    const query: { userId?: string; testType?: string } = {};
     if (userId && testType) {
-      query = { userId, testType };
+      query.userId = userId;
+      query.testType = testType;
     } else if (userId) {
-      query = { userId };
+      query.userId = userId;
     }
     
     const tests = await TestAttempt.find(query)
@@ -137,10 +173,11 @@ export async function GET(request: NextRequest) {
       .lean();
     
     return NextResponse.json({ success: true, data: tests });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error fetching test data:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch test data' },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }

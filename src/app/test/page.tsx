@@ -313,8 +313,8 @@ function TestContent() {
     };
 
     // Helper to calculate score consistently
-    const calculateScore = (questions, answers) => {
-        const correctCount = questions.filter((q, i) => 
+    const calculateScore = (questions: TestQuestion[], answers: string[]) => {
+        const correctCount = questions.filter((q: TestQuestion, i: number) => 
             (answers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()
         ).length;
         return Math.round((correctCount / questions.length) * 100);

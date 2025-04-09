@@ -2,6 +2,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Session from '@/models/Session';
 import User from '@/models/User';
+import mongoose from 'mongoose';
+
+interface Message {
+  id?: number;
+  sender?: string;
+  agentId?: string | null;
+  text?: string | any;
+  timestamp?: string | Date;
+}
+
+interface SessionData {
+  userId: string;
+  questionId?: number;
+  questionText?: string;
+  startTime?: string | Date;
+  endTime?: string | Date;
+  duration?: number;
+  finalAnswer?: string;
+  scratchboardContent?: string;
+  messages?: Message[];
+  isCorrect?: boolean;
+  timeoutOccurred?: boolean;
+}
+
+interface FormattedMessage {
+  id: number;
+  sender: string;
+  agentId: string | null;
+  text: string;
+  timestamp: Date;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,11 +40,11 @@ export async function POST(request: NextRequest) {
     console.log("📝 Starting session submission process");
     
     // 1. Get the raw request body first for debugging
-    let rawBody;
+    let rawBody: string;
     try {
       rawBody = await request.text();
       console.log(`Raw data size: ${rawBody.length} bytes`);
-    } catch (rawError) {
+    } catch (rawError: unknown) {
       console.error("Failed to read raw request:", rawError);
       return NextResponse.json({ 
         success: false, 
@@ -24,20 +55,21 @@ export async function POST(request: NextRequest) {
     // 2. Connect to database
     try {
       await connectToDatabase();
-    } catch (dbError) {
+    } catch (dbError: unknown) {
       console.error("Database connection failed:", dbError);
+      const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown database error';
       return NextResponse.json({ 
         success: false, 
         error: "Database connection failed",
-        details: dbError.message
+        details: errorMessage
       }, { status: 500 });
     }
     
     // 3. Parse the request body
-    let sessionData;
+    let sessionData: SessionData;
     try {
       sessionData = JSON.parse(rawBody);
-    } catch (jsonError) {
+    } catch (jsonError: unknown) {
       console.error("Invalid JSON in request:", jsonError);
       return NextResponse.json({ 
         success: false, 
@@ -55,7 +87,7 @@ export async function POST(request: NextRequest) {
     }
     
     // 5. Process messages with robust error handling
-    let formattedMessages = [];
+    let formattedMessages: FormattedMessage[] = [];
     try {
       // Ensure messages is always an array
       if (!Array.isArray(sessionData.messages)) {
@@ -71,11 +103,11 @@ export async function POST(request: NextRequest) {
       
       // Process each message with careful type checking
       formattedMessages = sessionData.messages
-        .filter(msg => msg !== null && msg !== undefined)
-        .map((message, index) => {
+        .filter((msg: Message | null | undefined): msg is Message => msg !== null && msg !== undefined)
+        .map((message: Message, index: number): FormattedMessage | null => {
           try {
             // Format timestamp
-            let timestamp;
+            let timestamp: Date;
             try {
               if (message.timestamp) {
                 // Try parsing as Date object
@@ -94,7 +126,7 @@ export async function POST(request: NextRequest) {
             }
             
             // Process text content
-            let textContent;
+            let textContent: string;
             if (typeof message.text === 'string') {
               textContent = message.text;
             } else if (message.text) {
@@ -119,7 +151,7 @@ export async function POST(request: NextRequest) {
             return null;
           }
         })
-        .filter(msg => msg !== null);
+        .filter((msg: FormattedMessage | null): msg is FormattedMessage => msg !== null);
       
       console.log(`Processed ${formattedMessages.length} valid messages`);
       // Log a sample of formatted messages
@@ -157,12 +189,13 @@ export async function POST(request: NextRequest) {
         timeoutOccurred: Boolean(sessionData.timeoutOccurred),
         tempRecord: false // Always permanent now
       });
-    } catch (docError) {
+    } catch (docError: unknown) {
       console.error("Failed to create session document:", docError);
+      const errorMessage = docError instanceof Error ? docError.message : 'Unknown document creation error';
       return NextResponse.json({ 
         success: false, 
         error: "Failed to create session document",
-        details: docError.message
+        details: errorMessage
       }, { status: 400 });
     }
     
@@ -170,12 +203,12 @@ export async function POST(request: NextRequest) {
     try {
       await session.save();
       console.log(`✅ Session saved with ID: ${session._id}`);
-    } catch (saveError) {
+    } catch (saveError: unknown) {
       console.error("Error saving to MongoDB:", saveError);
       
       // Check for validation errors
-      if (saveError.name === 'ValidationError') {
-        const validationErrors = Object.keys(saveError.errors || {}).map(field => ({
+      if (saveError instanceof mongoose.Error.ValidationError) {
+        const validationErrors = Object.keys(saveError.errors).map(field => ({
           field,
           message: saveError.errors[field].message
         }));
@@ -187,10 +220,11 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       }
       
+      const errorMessage = saveError instanceof Error ? saveError.message : 'Unknown save error';
       return NextResponse.json({ 
         success: false, 
         error: "Database save operation failed",
-        details: saveError.message
+        details: errorMessage
       }, { status: 500 });
     }
     
@@ -199,13 +233,14 @@ export async function POST(request: NextRequest) {
       sessionId: session._id
     });
     
-  } catch (error) {
+  } catch (error: unknown) {
     // Global error handler
     console.error("Unhandled error in session submission:", error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ 
       success: false, 
       error: "Internal server error", 
-      details: error.message
+      details: errorMessage
     }, { status: 500 });
   }
 }
@@ -218,7 +253,7 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get('userId');
     
     // Build query - no longer using tempRecord filter
-    let query: any = {};
+    const query: { userId?: string } = {};
     if (userId) {
       query.userId = userId;
     }
@@ -236,10 +271,11 @@ export async function GET(request: NextRequest) {
     console.log(`Returning ${sessions.length} sessions`);
     
     return NextResponse.json({ success: true, data: sessions });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching sessions:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch sessions' },
+      { success: false, error: 'Failed to fetch sessions', details: errorMessage },
       { status: 500 }
     );
   }
