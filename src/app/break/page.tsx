@@ -1,64 +1,51 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useFlow } from '@/context/FlowContext';
-import Tetris from '@/components/Tetris';
+import TetrisGame from '@/components/TetrisGame';
 
 export default function BreakPage() {
-    const [timeLeft, setTimeLeft] = useState(5); // 5 minutes
-    const { completeTetrisBreak, currentStage } = useFlow();
-
-    // Ensure user is in the proper flow stage
-    useEffect(() => {
-        // Wrap the localStorage update in a setTimeout to move it out of the render cycle
-        if (currentStage !== 'tetris-break') {
-            console.warn(`Warning: User accessed break page in incorrect stage: ${currentStage}`);
-            
-            // Use setTimeout to defer the update to avoid updating during render
-            setTimeout(() => {
-                localStorage.setItem('currentStage', 'tetris-break');
-            }, 0);
-        }
-    }, [currentStage]);
-
-    useEffect(() => {
-        const timer = setInterval(() => {
-            setTimeLeft(prev => {
-                if (prev <= 1) {
-                    clearInterval(timer);
-                    completeTetrisBreak(); // Use Flow context to advance
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-
-        return () => clearInterval(timer);
-    }, [completeTetrisBreak]);
-
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
-    return (
-        <div className="bg-gradient-to-b from-[#2D0278] to-[#0A001D] min-h-screen p-8 flex flex-col items-center">
-            <h1 className="text-3xl text-white font-bold mb-6">Break Time!</h1>
-            <p className="text-white text-xl mb-8">
-                Take a 5-minute break and play some Tetris.
-                Test phase will begin automatically when the timer ends.
-            </p>
-
-            <div className="bg-white bg-opacity-10 p-4 rounded-lg mb-6">
-                <div className="text-2xl text-white font-mono">
-                    Time left: {formatTime(timeLeft)}
-                </div>
-            </div>
-
-            <div className="bg-black bg-opacity-30 p-6 rounded-xl">
-                <Tetris />
-            </div>
+  const { completeTetrisBreak, currentStage } = useFlow();
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  
+  // CRITICAL FIX: Only check stage in useEffect, not during render
+  useEffect(() => {
+    // Verify we're in the correct stage
+    if (currentStage !== 'tetris-break') {
+      console.warn(`Warning: User accessed break page in incorrect stage: ${currentStage}`);
+    }
+  }, [currentStage]);
+  
+  // Handle completion separately
+  const handleGameComplete = () => {
+    if (isTransitioning) return; // Prevent double-transitions
+    
+    setIsTransitioning(true);
+    console.log("Tetris game complete, proceeding to post-test...");
+    
+    // Add delay to ensure state updates complete before navigation
+    setTimeout(() => {
+      completeTetrisBreak();
+    }, 500);
+  };
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] flex flex-col">
+      <div className="container mx-auto p-8 flex-1 flex flex-col">
+        <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
+          <h1 className="text-3xl text-white font-bold mb-4">Take a Short Break</h1>
+          <p className="text-white opacity-90 mb-2">
+            Let's take a quick cognitive break before continuing.
+          </p>
+          <p className="text-white opacity-90">
+            Play a quick game of Tetris, then we'll move on to the next section.
+          </p>
         </div>
-    );
+        
+        <div className="flex-1 flex justify-center items-center">
+          <TetrisGame onGameComplete={handleGameComplete} />
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -7,6 +7,7 @@ import { Piece } from '@/utils/types';
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 20;
 const EMPTY_CELL = 0;
+const SCORE_THRESHOLD = 500; // Score needed to trigger completion
 
 // Define tetromino shapes
 const SHAPES = [
@@ -22,7 +23,11 @@ const SHAPES = [
 // Define colors for each shape
 const COLORS = ['#00F0F0', '#F0F000', '#A000F0', '#F00000', '#00F000', '#0000F0', '#F0A000'];
 
-export default function Tetris() {
+interface TetrisGameProps {
+  onGameComplete?: () => void;
+}
+
+export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
     // Create empty board
     const createEmptyBoard = () =>
         Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(EMPTY_CELL));
@@ -32,6 +37,8 @@ export default function Tetris() {
     const [score, setScore] = useState(0);
     const [gameOver, setGameOver] = useState(false);
     const [gameStarted, setGameStarted] = useState(false);
+    const [completionCalled, setCompletionCalled] = useState(false);
+    const [timeRemaining, setTimeRemaining] = useState(10); // Change back to 120 seconds (2 minutes)
 
     // Generate a random piece
     const getRandomPiece = useCallback((): Piece => {
@@ -111,7 +118,10 @@ export default function Tetris() {
             const { newBoard: clearedBoard, rowsCleared } = clearRows(newBoard);
 
             setBoard(clearedBoard);
-            setScore(prev => prev + (rowsCleared * 100));
+            
+            // Update score and check if threshold reached
+            const newScore = score + (rowsCleared * 100);
+            setScore(newScore);
 
             const nextPiece = getRandomPiece();
 
@@ -121,7 +131,7 @@ export default function Tetris() {
                 setCurrentPiece(nextPiece);
             }
         }
-    }, [board, currentPiece, gameOver, gameStarted, isValidMove, addPieceToBoard, clearRows, getRandomPiece]);
+    }, [board, currentPiece, gameOver, gameStarted, isValidMove, addPieceToBoard, clearRows, getRandomPiece, score]);
 
     // Drop the piece faster
     const dropPiece = useCallback(() => {
@@ -177,6 +187,54 @@ export default function Tetris() {
             clearInterval(gameLoop);
         };
     }, [gameStarted, gameOver, dropPiece]);
+    
+    // Timer countdown
+    useEffect(() => {
+        // CRITICAL FIX: Wait for first render to complete before starting timer
+        const timerStart = requestAnimationFrame(() => {
+            const timer = setInterval(() => {
+                setTimeRemaining(prev => {
+                    if (prev <= 1) {
+                        clearInterval(timer);
+                        if (onGameComplete && !completionCalled) {
+                            setCompletionCalled(true);
+                            
+                            // Use requestAnimationFrame again for the callback
+                            requestAnimationFrame(() => {
+                                onGameComplete();
+                            });
+                        }
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+            
+            return () => clearInterval(timer);
+        });
+        
+        return () => cancelAnimationFrame(timerStart);
+    }, []);
+
+    // Handle game completion
+    useEffect(() => {
+        // Avoid calling onGameComplete multiple times
+        if (completionCalled) return;
+        
+        const shouldComplete = 
+            (score >= SCORE_THRESHOLD) || 
+            gameOver || 
+            timeRemaining <= 0;
+            
+        if (shouldComplete && onGameComplete && !completionCalled) {
+            setCompletionCalled(true);
+            
+            // CRITICAL FIX: Use requestAnimationFrame to defer the callback until after render
+            requestAnimationFrame(() => {
+                onGameComplete();
+            });
+        }
+    }, [score, gameOver, timeRemaining, onGameComplete, completionCalled]);
 
     // Start new game
     const startGame = () => {
@@ -185,6 +243,7 @@ export default function Tetris() {
         setScore(0);
         setGameOver(false);
         setGameStarted(true);
+        setCompletionCalled(false);
     };
 
     // Render the combined board with the current piece
@@ -208,9 +267,30 @@ export default function Tetris() {
         return displayBoard;
     };
 
+    // Format time as MM:SS
+    const formatTime = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    };
+
+    // Skip button for those who don't want to play
+    const handleSkip = () => {
+        if (onGameComplete && !completionCalled) {
+            console.log("User skipped tetris game");
+            setCompletionCalled(true);
+            setTimeout(() => {
+                onGameComplete();
+            }, 100);
+        }
+    };
+
     return (
         <div className="flex flex-col items-center">
-            <div className="mb-4 text-white text-xl">Score: {score}</div>
+            <div className="mb-4 text-white flex justify-between w-full px-4">
+                <div className="text-xl">Score: {score}</div>
+                <div className="text-xl">Time: {formatTime(timeRemaining)}</div>
+            </div>
 
             <div className="border border-gray-700 bg-black bg-opacity-70" style={{ width: BOARD_WIDTH * 25 + 'px' }}>
                 {renderBoard().map((row, y) => (
@@ -231,27 +311,47 @@ export default function Tetris() {
             </div>
 
             {!gameStarted && (
-                <button
-                    className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-                    onClick={startGame}
-                >
-                    Start Game
-                </button>
-            )}
-
-            {gameOver && (
-                <div className="mt-4 text-center">
-                    <div className="text-red-500 text-xl mb-2">Game Over!</div>
+                <div className="mt-4 flex flex-col items-center">
                     <button
-                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                        className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
                         onClick={startGame}
                     >
-                        Play Again
+                        Start Game
+                    </button>
+                    
+                    <button
+                        className="mt-4 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                        onClick={handleSkip}
+                    >
+                        Skip Break
                     </button>
                 </div>
             )}
 
-            {gameStarted && (
+            {gameOver && (
+                <div className="mt-4 text-center">
+                    <div className="text-white text-xl mb-2">
+                        {score >= SCORE_THRESHOLD ? "Well done!" : "Game Over!"}
+                    </div>
+                    <div className="flex space-x-4">
+                        <button
+                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                            onClick={startGame}
+                        >
+                            Play Again
+                        </button>
+                        
+                        <button
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            onClick={handleSkip}
+                        >
+                            Continue
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {gameStarted && !gameOver && (
                 <div className="mt-4 text-gray-300 text-sm">
                     <p>Controls:</p>
                     <p>← → : Move left/right</p>

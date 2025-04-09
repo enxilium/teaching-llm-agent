@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { nanoid } from 'nanoid';
 import UserService from '@/services/UserService';
@@ -41,11 +41,13 @@ interface TestQuestion {
   userAnswer: string;
   correctAnswer: string;
   isCorrect: boolean;
+  scratchboardContent?: string;
 }
 
 // Test data structure
 interface TestData {
   testType: 'pre' | 'post' | 'final';
+  submissionId?: string;
   questions: TestQuestion[];
   score: number;
   completedAt: Date;
@@ -64,12 +66,17 @@ interface SurveyData {
 // Flow data structure - everything we track during the flow
 interface FlowData {
   userId: string;
+  testId: string;
+  surveyData: SurveyData | null;
+  sessionData: SessionData[];
+  testData: TestData[];
+  sessionId: string;
+  questions: any[];
   currentStage: FlowStage;
   lessonType: LessonType | null;
   lessonQuestionIndex: number;
-  sessionData: SessionData[];
-  testData: TestData[];
-  surveyData: SurveyData | null;
+  hitId: string;
+  assignmentId: string;
 }
 
 // Define context type
@@ -78,6 +85,8 @@ interface FlowContextType {
   currentStage: FlowStage;
   lessonType: LessonType | null;
   lessonQuestionIndex: number;
+  hitId: string;
+  assignmentId: string;
   
   // Session management methods
   saveSessionData: (sessionData: SessionData) => void;
@@ -105,7 +114,12 @@ const defaultFlowData: FlowData = {
   lessonQuestionIndex: 0,
   sessionData: [],
   testData: [],
-  surveyData: null
+  surveyData: null,
+  testId: '',
+  sessionId: '',
+  questions: [],
+  hitId: '',
+  assignmentId: ''
 };
 
 // Create context with default values
@@ -114,6 +128,8 @@ const FlowContext = createContext<FlowContextType>({
   currentStage: 'terms',
   lessonType: null,
   lessonQuestionIndex: 0,
+  hitId: '',
+  assignmentId: '',
   
   saveSessionData: () => {},
   saveTestData: () => {},
@@ -139,16 +155,54 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   // State to track flow data
   const [flowData, setFlowData] = useState<FlowData>(defaultFlowData);
   const [initialized, setInitialized] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
   
   // Extract common values from flowData for easier access
-  const { userId, currentStage, lessonType, lessonQuestionIndex } = flowData;
+  const { userId, currentStage, lessonType, lessonQuestionIndex, hitId, assignmentId } = flowData;
+
+  // Add this near the top of your FlowProvider component
+  const transitionInProgressRef = useRef(false);
   
   // Clear flow and start fresh
   const resetFlow = () => {
-    const newUserId = nanoid();
+    // Extract workerId, hitId, and assignmentId from URL query parameters if available
+    let newUserId = "test" + Math.floor(Math.random() * 10000); // Default fallback for development
+    let hitId = '';
+    let assignmentId = '';
+    
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const workerIdParam = urlParams.get('workerId');
+      const hitIdParam = urlParams.get('hitId');
+      const assignmentIdParam = urlParams.get('assignmentId');
+      
+      // Use workerId as userId if available
+      if (workerIdParam) {
+        newUserId = workerIdParam;
+        console.log(`Using Prolific workerId as userId: ${newUserId}`);
+      } else {
+        console.log(`No workerId found, using development userId: ${newUserId}`);
+      }
+      
+      // Store hitId and assignmentId if available
+      if (hitIdParam) {
+        hitId = hitIdParam;
+      }
+      
+      if (assignmentIdParam) {
+        assignmentId = assignmentIdParam;
+      }
+      
+      console.log(`Query parameters - workerId: ${workerIdParam}, hitId: ${hitIdParam}, assignmentId: ${assignmentIdParam}`);
+    }
+    
     const newFlowData: FlowData = {
       ...defaultFlowData,
       userId: newUserId,
+      hitId: hitId,
+      assignmentId: assignmentId,
       lessonQuestionIndex: Math.floor(Math.random() * 2),
     };
     
@@ -181,36 +235,156 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   }, [flowData, initialized]);
   
   // Save session data method
-  const saveSessionData = (sessionData: SessionData) => {
-    setFlowData(prev => ({
-      ...prev,
-      sessionData: [...prev.sessionData, sessionData]
-    }));
-  };
-  
-  // Save test data method
-  const saveTestData = (testData: any) => {
-    console.log(`Saving ${testData.testType} test data with ${testData.questions?.length || 0} questions`);
+  const saveSessionData = (sessionData: any) => {
+    console.log(`💾 Saving session data for question ${sessionData.questionId} with ${sessionData.messages?.length || 0} messages`);
     
-    // Ensure proper data structure with non-empty userAnswer
+    // Log scratchboardContent to debug
+    console.log(`💾 Scratchboard content length: ${(sessionData.scratchboardContent || '').length} characters`);
+    
+    // CRITICAL: Log message count and validate data
+    if (!sessionData.messages || sessionData.messages.length === 0) {
+      console.warn("⚠️ No messages in session data - this might indicate an issue");
+    } else {
+      console.log(`💾 First message: ${typeof sessionData.messages[0].text === 'string' ? 
+        sessionData.messages[0].text.substring(0, 30) + '...' : 'non-string content'}`);
+      
+      // Log all message fields for debugging
+      console.log(`💾 Message fields: ${Object.keys(sessionData.messages[0]).join(', ')}`);
+      
+      // Check for any messages with missing required fields
+      const invalidMessages = sessionData.messages.filter((msg: any) => 
+        !msg.text || !msg.sender || msg.id === undefined
+      );
+      
+      if (invalidMessages.length > 0) {
+        console.warn(`⚠️ Found ${invalidMessages.length} messages with missing required fields`);
+      }
+    }
+    
+    // Deep clone messages to avoid mutation issues
+    let messagesCopy = [];
+    try {
+      messagesCopy = Array.isArray(sessionData.messages) 
+        ? sessionData.messages.map((msg: any) => ({
+            ...msg,
+            // Ensure text is a string
+            text: typeof msg.text === 'string' ? msg.text : String(msg.text || ''),
+            // Convert timestamp to ISO string for consistency
+            timestamp: msg.timestamp instanceof Date 
+              ? msg.timestamp 
+              : new Date(msg.timestamp || Date.now())
+          }))
+        : [];
+        
+      console.log(`💾 Processed ${messagesCopy.length} messages for storage`);
+    } catch (error) {
+      console.error("❌ Error processing messages:", error);
+      messagesCopy = [];
+    }
+    
+    // Ensure scratchboardContent is a string and not undefined/null
+    const sanitizedSessionData = {
+      ...sessionData,
+      scratchboardContent: sessionData.scratchboardContent || '',
+      messages: messagesCopy
+    };
+    
+    // Update state with atomic operation
+    setFlowData(prev => {
+      const updatedData = {
+        ...prev,
+        sessionData: [...(prev.sessionData || []), {
+          ...sanitizedSessionData,
+          userId,
+          _savedAt: new Date().toISOString() // Add timestamp for tracking
+        }]
+      };
+      
+      // Immediately update localStorage for resilience
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('flowData', JSON.stringify(updatedData));
+          
+          // Also create a separate backup of this specific session
+          const sessionBackup = {
+            questionId: sanitizedSessionData.questionId,
+            messages: sanitizedSessionData.messages,
+            scratchboardContent: sanitizedSessionData.scratchboardContent,
+            _savedAt: new Date().toISOString()
+          };
+          localStorage.setItem(`session_backup_${sanitizedSessionData.questionId}`, JSON.stringify(sessionBackup));
+          
+          console.log(`💾 Session ${sanitizedSessionData.questionId} backed up to localStorage with ${sanitizedSessionData.messages.length} messages`);
+        } catch (e) {
+          console.error("Error saving to localStorage:", e);
+        }
+      }
+      
+      return updatedData;
+    });
+  };
+
+  // Add this function after saveSessionData to explicitly create backups
+  const createBackups = () => {
+    if (typeof window === 'undefined') return;
+    
+    console.log("Creating emergency backups of all flow data");
+    
+    try {
+      // Save full flow context
+      localStorage.setItem('flowData_backup', JSON.stringify({
+        ...flowData,
+        _backupTime: new Date().toISOString()
+      }));
+      
+      // Save survey data separately
+      if (flowData.surveyData) {
+        localStorage.setItem('surveyData_backup', JSON.stringify({
+          ...flowData.surveyData,
+          _backupTime: new Date().toISOString()
+        }));
+      }
+      
+      // Save each session individually
+      if (flowData.sessionData?.length > 0) {
+        flowData.sessionData.forEach(session => {
+          localStorage.setItem(`session_backup_${session.questionId}`, JSON.stringify({
+            ...session,
+            _backupTime: new Date().toISOString()
+          }));
+        });
+      }
+      
+      console.log("✅ All emergency backups created successfully");
+    } catch (e) {
+      console.error("Error creating backups:", e);
+    }
+  };
+
+  // Call this function before any major navigation
+  useEffect(() => {
+    // Create backups when the stage changes
+    createBackups();
+  }, [currentStage]);
+  
+  // Update the saveTestData function to include scratchboardContent
+  const saveTestData = (testData: any) => {
+    console.log(`Saving ${testData.testType} test data to flow context`);
+    
+    // Create a normalized version of the test data with safe defaults
     const normalizedTestData = {
-      testType: (testData.testType === 'pre' || testData.testType === 'post' || testData.testType === 'final') 
-        ? testData.testType 
-        : 'pre', // Default to 'pre' if invalid type
+      testType: testData.testType,
+      submissionId: testData.submissionId || Date.now().toString(),
       questions: Array.isArray(testData.questions) 
-        ? testData.questions.map((q, index) => {
-            // CRITICAL: Ensure userAnswer is NEVER empty
-            let userAnswer = q.userAnswer;
-            if (!userAnswer || typeof userAnswer !== 'string' || userAnswer.trim() === '') {
-              userAnswer = "No answer provided";
-            }
-            
+        ? testData.questions.map((q: TestQuestion) => {
             return {
-              questionId: q.questionId || index,
-              question: typeof q.question === 'string' ? q.question : String(q.question || ''),
-              userAnswer: userAnswer, // Now guaranteed to be non-empty
+              questionId: q.questionId || 0,
+              question: typeof q.question === 'string' ? q.question : '',
+              userAnswer: typeof q.userAnswer === 'string' ? q.userAnswer : 'No answer provided',
               correctAnswer: typeof q.correctAnswer === 'string' ? q.correctAnswer : String(q.correctAnswer || ''),
-              isCorrect: Boolean(q.isCorrect)
+              isCorrect: Boolean(q.isCorrect),
+              // CRITICAL FIX: Add this line to preserve scratchboard content
+              scratchboardContent: q.scratchboardContent || ''
             };
           }) 
         : [],
@@ -218,13 +392,20 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       completedAt: testData.completedAt || new Date()
     };
     
-    // Check for duplicate test submissions
-    const isDuplicate = flowData.testData.some(
-      existingTest => existingTest.testType === normalizedTestData.testType
+    // Enhanced duplicate detection - check both test type AND submission ID
+    const existingTest = flowData.testData.find(
+      test => test.testType === normalizedTestData.testType
     );
     
-    if (isDuplicate) {
-      console.warn(`Duplicate ${normalizedTestData.testType} test submission detected, replacing previous data`);
+    if (existingTest) {
+      // If we have the same submission ID, it's truly a duplicate - ignore it
+      if (existingTest.submissionId === normalizedTestData.submissionId) {
+        console.warn(`Ignoring duplicate test submission with ID ${normalizedTestData.submissionId}`);
+        return; // Don't process the duplicate at all
+      }
+      
+      // If the IDs differ, it's a replacement - log and proceed
+      console.warn(`Replacing ${normalizedTestData.testType} test submission`);
       
       // Replace existing test of same type
       setFlowData(prev => ({
@@ -243,47 +424,79 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       }));
     }
     
-    // Update localStorage
+    // Update localStorage for resilience
     setTimeout(() => {
       if (typeof window !== 'undefined') {
-        const updatedFlowData = {
-          ...flowData,
-          testData: flowData.testData.filter(t => t.testType !== normalizedTestData.testType)
-            .concat([normalizedTestData])
-        };
-        localStorage.setItem('flowData', JSON.stringify(updatedFlowData));
-        console.log(`Updated localStorage with ${normalizedTestData.testType} test data`);
+        try {
+          const updatedFlowData = {
+            ...flowData,
+            testData: [...flowData.testData.filter(t => t.testType !== normalizedTestData.testType), 
+                      normalizedTestData]
+          };
+          localStorage.setItem('flowData', JSON.stringify(updatedFlowData));
+          localStorage.setItem(`test_backup_${normalizedTestData.testType}`, 
+                             JSON.stringify({...normalizedTestData, _savedAt: new Date().toISOString()}));
+          console.log(`Updated localStorage with ${normalizedTestData.testType} test data`);
+        } catch (e) {
+          console.error("Failed to save test data to localStorage:", e);
+        }
       }
     }, 0);
   };
   
-  // Save survey data method
-  const saveSurveyData = (surveyData: SurveyData) => {
-    console.log("Saving survey data to flow context:", surveyData);
+  // Improve saveSurveyData with better debugging
+  const saveSurveyData = useCallback((data: SurveyData) => {
+    console.log("💾 Saving survey data:", data);
     
-    // Add timestamp for tracking
-    const surveyWithTimestamp = {
-      ...surveyData,
-      submittedAt: new Date().toISOString()
-    };
+    // Create timestamp for when survey was completed
+    const timestamp = new Date().toISOString();
+    const surveyWithTimestamp = { ...data, completedAt: timestamp };
     
-    // Update the flow data with survey results
+    // CRITICAL FIX: Update localStorage FIRST (synchronously) before React state update
+    if (typeof window !== 'undefined') {
+      try {
+        // Create dedicated backup of survey data
+        localStorage.setItem('surveyData_backup', JSON.stringify(surveyWithTimestamp));
+        console.log("✅ Created survey data backup in localStorage");
+        
+        // Also update the full flowData in localStorage with the new survey data
+        const currentFlowData = localStorage.getItem('flowData');
+        if (currentFlowData) {
+          const parsedFlowData = JSON.parse(currentFlowData);
+          const updatedFlowData = { 
+            ...parsedFlowData, 
+            surveyData: surveyWithTimestamp,
+            _lastUpdated: timestamp
+          };
+          localStorage.setItem('flowData', JSON.stringify(updatedFlowData));
+          console.log("✅ Updated flowData in localStorage with survey data");
+        }
+      } catch (e) {
+        console.error("Failed to create survey backup in localStorage:", e);
+      }
+    }
+    
+    // Update flow context with survey data
     setFlowData(prev => {
-      const updated = {
-        ...prev,
-        surveyData: surveyWithTimestamp
-      };
+      const updated = { ...prev, surveyData: surveyWithTimestamp };
       
-      // Also update localStorage to ensure data persistence
+      // Already updated localStorage above, but double-check here
       if (typeof window !== 'undefined') {
-        localStorage.setItem('flowData', JSON.stringify(updated));
+        try {
+          // Verify localStorage was updated correctly
+          const storedSurveyData = localStorage.getItem('surveyData_backup');
+          if (!storedSurveyData) {
+            console.warn("Survey data not found in localStorage, saving again");
+            localStorage.setItem('surveyData_backup', JSON.stringify(surveyWithTimestamp));
+          }
+        } catch (e) {
+          console.error("Failed to verify localStorage survey data:", e);
+        }
       }
       
       return updated;
     });
-    
-    console.log("Survey data saved successfully");
-  };
+  }, []);
   
   // Stage transition methods
   const agreeToTerms = () => {
@@ -295,46 +508,124 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     router.push('/test?stage=pre');
   };
   
+  // Simplified completePreTest function
   const completePreTest = () => {
+    console.log("Starting pre-test completion transition");
+    
     // Select random lesson type
     const lessonTypes: LessonType[] = ['group', 'multi', 'single', 'solo'];
     const randomLessonType = lessonTypes[Math.floor(Math.random() * lessonTypes.length)];
+    console.log(`Selected random lesson: ${randomLessonType}`);
     
+    // Update state
     setFlowData(prev => ({
-      ...prev,
-      currentStage: 'lesson',
-      lessonType: randomLessonType
+        ...prev,
+        currentStage: 'lesson',
+        lessonType: randomLessonType
     }));
     
-    router.push(`/${randomLessonType}`);
+    // Update localStorage
+    if (typeof window !== 'undefined') {
+        localStorage.setItem('currentStage', 'lesson');
+        localStorage.setItem('lessonType', randomLessonType);
+    }
+    
+    // Navigate with delay to allow state to update
+    setTimeout(() => {
+        try {
+            router.push(`/${randomLessonType}`);
+        } catch (error) {
+            console.error("Navigation error:", error);
+            // Fallback direct navigation
+            window.location.href = `/${randomLessonType}`;
+        }
+    }, 300);
   };
-  
+
   const completeLesson = () => {
     console.log('Starting lesson completion transition...');
     
-    // First update the state and localStorage synchronously
-    setFlowData(prev => {
-        const newData = {
-            ...prev,
-            currentStage: 'tetris-break' as FlowStage
+    try {
+      // CRITICAL: Create backup of flow data before navigation
+      if (typeof window !== 'undefined') {
+        console.log('Creating persistent backup before navigation');
+        localStorage.setItem('flowData_preserved', JSON.stringify(flowData));
+        localStorage.setItem('currentStage', 'tetris-break');
+      }
+      
+      // Update the state in a safer way
+      setFlowData(prev => {
+        const updated = {
+          ...prev,
+          currentStage: 'tetris-break' as FlowStage
         };
         
-        // Immediately update localStorage to ensure consistency
+        // Also update localStorage immediately to ensure data persistence
         if (typeof window !== 'undefined') {
-            localStorage.setItem('flowData', JSON.stringify(newData));
+          try {
+            localStorage.setItem('flowData', JSON.stringify(updated));
+          } catch (e) {
+            console.error("Error saving to localStorage during transition:", e);
+          }
         }
         
-        console.log('Flow state updated to tetris-break');
-        return newData;
-    });
-    
-    // Add a small delay to ensure state updates are fully committed
-    setTimeout(() => {
-        console.log('Navigating to break page...');
-        router.push('/break');
-    }, 100);
+        return updated;
+      });
+      
+      // Add a significant delay before navigation to ensure state updates complete
+      setTimeout(() => {
+        try {
+          // Verify our stage was properly updated
+          const currentSavedStage = localStorage.getItem('currentStage');
+          console.log(`Stage before navigation: ${currentSavedStage}`);
+          
+          if (currentSavedStage !== 'tetris-break') {
+            console.warn('Stage mismatch, forcing correction in localStorage');
+            localStorage.setItem('currentStage', 'tetris-break');
+          }
+          
+          console.log('Navigating to break page...');
+          router.push('/break');
+        } catch (error) {
+          console.error('Navigation error:', error);
+          // Emergency fallback
+          window.location.href = '/break';
+        }
+      }, 600);
+    } catch (error) {
+      console.error('Error in completeLesson:', error);
+      // Last resort emergency redirect
+      window.location.href = '/break';
+    }
   };
   
+  // Simplified completePostTest function
+  const completePostTest = () => {
+    console.log("Starting post-test completion transition");
+    
+    // Update state
+    setFlowData(prev => ({
+        ...prev,
+        currentStage: 'final-test'
+    }));
+    
+    // Update localStorage
+    if (typeof window !== 'undefined') {
+        localStorage.setItem('currentStage', 'final-test');
+    }
+    
+    // Navigate with delay
+    setTimeout(() => {
+        try {
+            router.push('/test?stage=final');
+        } catch (error) {
+            console.error("Navigation error:", error);
+            // Fallback direct navigation
+            window.location.href = '/test?stage=final';
+        }
+    }, 300);
+  };
+
   const completeTetrisBreak = () => {
     setFlowData(prev => ({
       ...prev,
@@ -342,15 +633,6 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     }));
     
     router.push('/test?stage=post');
-  };
-  
-  const completePostTest = () => {
-    setFlowData(prev => ({
-      ...prev,
-      currentStage: 'final-test'
-    }));
-    
-    router.push('/test?stage=final');
   };
   
   // The most important method - store everything to database
@@ -377,168 +659,174 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Update submitAllDataToDatabase to prevent duplicate session submissions
+  // Update the submitAllDataToDatabase function with better logging
   const submitAllDataToDatabase = async () => {
-    console.log("submitAllDataToDatabase called - submitting all flow data to database");
+    if (!flowData) {
+      console.error("No flow data available for submission");
+      return;
+    }
+    
+    console.log("💾 Attempting to submit all data to database...");
+    setIsSubmitting(true);
     
     try {
-      // 1. Create permanent user
-      console.log("Step 1: Creating permanent user record");
-      await UserService.createOrUpdateUser({
-        userId,
-        flowStage: 'completed',
-        lessonType: lessonType ?? undefined,
-        lessonQuestionIndex,
-        tempRecord: false
-      });
+      // Check if we have survey data in the flow context
+      let surveyDataToSubmit = flowData.surveyData;
       
-      // 2. Submit all sessions - CHECK FOR DUPLICATES first
-      if (flowData.sessionData.length > 0) {
-        console.log(`Step 2: Checking for ${flowData.sessionData.length} sessions to submit`);
+      // If no survey data in flow context, try to recover from dedicated backup
+      if (!surveyDataToSubmit) {
+        console.log("⚠️ No survey data found in flow context, attempting recovery from backup...");
         
-        // Track which questionIds we've already processed to avoid duplicates
-        const processedQuestionIds = new Set();
-        
-        for (const session of flowData.sessionData) {
-          // Skip if we've already processed this questionId
-          if (processedQuestionIds.has(session.questionId)) {
-            console.log(`Skipping duplicate session for questionId: ${session.questionId}`);
-            continue;
-          }
-          
-          // Mark this questionId as processed
-          processedQuestionIds.add(session.questionId);
-          
+        // Try to get from dedicated backup in localStorage
+        if (typeof window !== 'undefined') {
           try {
-            console.log(`Submitting session for question ${session.questionId}`);
-            const response = await fetch('/api/sessions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                ...session,
-                userId,
-                tempRecord: false // Mark as permanent
-              })
-            });
-            
-            if (!response.ok) {
-              throw new Error(`HTTP Error ${response.status}: ${response.statusText}`);
+            const backupData = localStorage.getItem('surveyData_backup');
+            if (backupData) {
+              surveyDataToSubmit = JSON.parse(backupData);
+              console.log("✅ Recovered survey data from dedicated backup");
             }
-            
-            const result = await response.json();
-            console.log(`Session saved with ID: ${result.sessionId || 'unknown'}`);
-          } catch (error) {
-            console.error(`Error submitting session for question ${session.questionId}:`, error);
-            // Continue with other submissions even if one fails
+          } catch (e) {
+            console.error("Failed to parse backup survey data:", e);
+          }
+        }
+        
+        // If still no survey data, try to get from flowData in localStorage
+        if (!surveyDataToSubmit && typeof window !== 'undefined') {
+          try {
+            const storedFlowData = localStorage.getItem('flowData');
+            if (storedFlowData) {
+              const parsedFlowData = JSON.parse(storedFlowData);
+              if (parsedFlowData.surveyData) {
+                surveyDataToSubmit = parsedFlowData.surveyData;
+                console.log("✅ Recovered survey data from localStorage flowData");
+              }
+            }
+          } catch (e) {
+            console.error("Failed to parse localStorage flowData:", e);
           }
         }
       }
       
-      // 3. Submit all test results with IMPROVED VALIDATION
-      if (flowData.testData.length > 0) {
-        console.log(`Step 3: Submitting ${flowData.testData.length} test records`);
+      // Now check if we have survey data to submit
+      if (surveyDataToSubmit) {
+        console.log("📤 Submitting with survey data:", surveyDataToSubmit);
         
-        for (const test of flowData.testData) {
-          try {
-            console.log(`Submitting ${test.testType} test`);
-            const response = await fetch('/api/tests', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                ...test,
-                userId // Add userId here when sending to API
-              })
-            });
-            
-            if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(`HTTP Error ${response.status}: ${errorText}`);
-            }
-            
-            const result = await response.json();
-            console.log(`${test.testType} test saved successfully, ID: ${result.testId || 'unknown'}`);
-          } catch (error) {
-            console.error(`Error submitting ${test.testType} test:`, error);
-            // Continue with other submissions even if one fails
-          }
-        }
-      }
-      
-      // 4. Submit final survey data
-      if (flowData.surveyData) {
-        console.log("Step 4: Submitting survey data:", flowData.surveyData);
+        // Final submission with all required data
+        const response = await fetch('/api/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: flowData.userId,
+            testId: flowData.testId,
+            completedAt: new Date().toISOString(),
+            questionResponses: flowData.questions || [],
+            surveyData: surveyDataToSubmit,
+            sessionId: flowData.sessionId,
+            // Add testData and sessionData arrays to the submission
+            testData: flowData.testData || [],
+            sessionData: flowData.sessionData || []
+          }),
+        });
         
-        try {
-          const response = await fetch('/api/submit-survey', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId,
-              section: 'post-test',
-              data: flowData.surveyData
-            })
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP Error ${response.status}: ${errorText}`);
-          }
-          
-          console.log("Survey data successfully submitted");
-        } catch (error) {
-          console.error("Error submitting survey data:", error);
-          // Log more details about the error
-          if (error instanceof Error) {
-            console.error("Error details:", error.message);
-          }
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${await response.text()}`);
         }
+        
+        const result = await response.json();
+        console.log("✅ Successfully submitted all data:", result);
+        
+        // Clear localStorage after successful submission
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('flowData');
+          localStorage.removeItem('surveyData_backup');
+        }
+        
+        // Mark as submitted but don't redirect to thank-you page
+        setHasSubmitted(true);
       } else {
-        console.warn("No survey data found in flow context - did you complete the survey?");
+        // Create a fallback submission without survey data as last resort
+        console.error("❌ No survey data found for submission - sending partial data");
+        
+        const response = await fetch('/api/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: flowData.userId,
+            testId: flowData.testId,
+            completedAt: new Date().toISOString(),
+            questionResponses: flowData.questions || [],
+            // Send empty survey data with error flag
+            surveyData: { 
+              error: "Survey data not found",
+              recoveryAttempted: true,
+              timestamp: new Date().toISOString()
+            },
+            sessionId: flowData.sessionId,
+            // Add testData and sessionData arrays to the submission
+            testData: flowData.testData || [],
+            sessionData: flowData.sessionData || []
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${await response.text()}`);
+        }
+        
+        const result = await response.json();
+        console.log("⚠️ Submitted partial data (without survey):", result);
+        
+        // Mark as submitted but don't redirect to thank-you page
+        setHasSubmitted(true);
       }
-      
-      console.log("All data successfully submitted to database");
-      
     } catch (error) {
-      console.error("Error in submitAllDataToDatabase:", error);
+      console.error("❌ Failed to submit data:", error);
+      setSubmissionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Context value
-  const contextValue = useMemo(
-    () => ({
-      userId,
-      currentStage,
-      lessonType,
-      lessonQuestionIndex,
-      
-      saveSessionData,
-      saveTestData,
-      saveSurveyData,
-      
-      agreeToTerms,
-      completePreTest,
-      completeLesson,
-      completeTetrisBreak,
-      completePostTest,
-      completeFinalTest,
-      resetFlow,
-      submitAllDataToDatabase
-    }),
-    [
-      currentStage,
-      userId,
-      lessonType,
-      lessonQuestionIndex,
-      flowData,
-      completeLesson,
-      completePreTest,
-      completePostTest,
-      completeFinalTest
-    ]
-  );
+  // Memoize the context value to prevent unnecessary re-renders
+  const value = useMemo(() => ({
+    userId,
+    currentStage,
+    lessonType,
+    lessonQuestionIndex,
+    hitId,
+    assignmentId,
+    
+    saveSessionData,
+    saveTestData,
+    saveSurveyData,
+    
+    agreeToTerms,
+    completePreTest,
+    completeLesson,
+    completeTetrisBreak,
+    completePostTest,
+    completeFinalTest,
+    resetFlow,
+    submitAllDataToDatabase
+  }), [
+    currentStage,
+    userId,
+    lessonType,
+    lessonQuestionIndex,
+    hitId,
+    assignmentId,
+    flowData,
+    completeLesson,
+    completePreTest,
+    completePostTest,
+    completeFinalTest
+  ]);
   
   return (
-    <FlowContext.Provider value={contextValue}>
+    <FlowContext.Provider value={value}>
       {children}
     </FlowContext.Provider>
   );

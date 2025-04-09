@@ -63,19 +63,56 @@ export async function POST(request: NextRequest) {
         sessionData.messages = [];
       }
       
+      // Log raw messages before processing
+      console.log(`Raw messages array length: ${sessionData.messages.length}`);
+      if (sessionData.messages.length > 0) {
+        console.log(`Raw first message: ${JSON.stringify(sessionData.messages[0])}`);
+      }
+      
       // Process each message with careful type checking
       formattedMessages = sessionData.messages
         .filter(msg => msg !== null && msg !== undefined)
         .map((message, index) => {
           try {
+            // Format timestamp
+            let timestamp;
+            try {
+              if (message.timestamp) {
+                // Try parsing as Date object
+                timestamp = new Date(message.timestamp);
+                // Validate the date
+                if (isNaN(timestamp.getTime())) {
+                  console.warn(`Invalid timestamp for message ${index}, using current time`);
+                  timestamp = new Date();
+                }
+              } else {
+                timestamp = new Date();
+              }
+            } catch (timeError) {
+              console.warn(`Error processing timestamp for message ${index}, using current time:`, timeError);
+              timestamp = new Date();
+            }
+            
+            // Process text content
+            let textContent;
+            if (typeof message.text === 'string') {
+              textContent = message.text;
+            } else if (message.text) {
+              try {
+                textContent = JSON.stringify(message.text);
+              } catch (e) {
+                textContent = String(message.text);
+              }
+            } else {
+              textContent = '';
+            }
+            
             return {
               id: typeof message.id === 'number' ? message.id : index,
               sender: String(message.sender || 'system'),
               agentId: message.agentId || null,
-              text: typeof message.text === 'string' 
-                ? message.text 
-                : (message.text ? JSON.stringify(message.text) : ''),
-              timestamp: message.timestamp ? new Date(message.timestamp) : new Date()
+              text: textContent,
+              timestamp: timestamp
             };
           } catch (msgError) {
             console.warn(`Error formatting message ${index}, skipping:`, msgError);
@@ -85,6 +122,10 @@ export async function POST(request: NextRequest) {
         .filter(msg => msg !== null);
       
       console.log(`Processed ${formattedMessages.length} valid messages`);
+      // Log a sample of formatted messages
+      if (formattedMessages.length > 0) {
+        console.log(`Sample formatted message: ${JSON.stringify(formattedMessages[0])}`);
+      }
     } catch (messagesError) {
       console.error("Error processing messages array:", messagesError);
       // Continue with empty messages rather than failing
@@ -94,6 +135,14 @@ export async function POST(request: NextRequest) {
     // 6. Create session document with explicit defaults
     let session;
     try {
+      // Log specific fields for debugging
+      console.log(`Creating session document with:
+        - userId: ${String(sessionData.userId)}
+        - questionId: ${sessionData.questionId !== undefined ? sessionData.questionId : 0}
+        - scratchboardContent length: ${(sessionData.scratchboardContent || '').length} characters
+        - messages count: ${formattedMessages.length}
+      `);
+      
       session = new Session({
         userId: String(sessionData.userId),
         questionId: sessionData.questionId !== undefined ? sessionData.questionId : 0,

@@ -10,9 +10,14 @@ type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' 
 export default function Terms() {
     const { agreeToTerms } = useFlow();
     const [termsAccepted, setTermsAccepted] = useState(false);
+    const [checked, setChecked] = useState(false);
+    const [checkedTwo, setCheckedTwo] = useState(false);
     const [captchaPassed, setCaptchaPassed] = useState(false);
     const [userCaptchaInput, setUserCaptchaInput] = useState("");
     const [captchaSolution, setCaptchaSolution] = useState("");
+
+    const handleCheck = () => setChecked(!checked);
+    const handleCheckTwo = () => setCheckedTwo(!checkedTwo);
 
     const handleCaptchaVerification = (e: React.FormEvent) => {
         e.preventDefault();
@@ -50,10 +55,10 @@ export default function Terms() {
 
     // Once captcha is passed, display Terms and Conditions page
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8 flex flex-col items-center justify-center">
-            <div className="w-full max-w-3xl bg-white bg-opacity-10 rounded-xl p-8 shadow-lg">
+        <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8">
+            <div className="max-w-3xl mx-auto text-white">
                 <h1 className="text-3xl font-bold text-white text-center mb-6">Terms and Conditions</h1>
-                <div className="h-64 overflow-y-auto bg-white bg-opacity-5 p-6 rounded-lg mb-6 text-white">
+                <div className="mb-6">
                     {/* Your original terms and conditions content */}
                     <p className="mb-4 font-bold">
                         University of Toronto Research Project Participation Consent Form
@@ -74,24 +79,46 @@ export default function Terms() {
                         <br />
                         • You assign to the researchers all copyright of your survey contributions for use in all current and future work stemming from this project.
                     </p>
+                    
+                    <div className='text-2xl mb-4'>
+                        <div className='text-red-700 font-bold'>Important: Please do not take screenshots, copy any text, or consult external tools (e.g., ChatGPT).</div>
+                        We're just interested in your best effort and what you learn.
+                        The experiment will be ruined if you take screenshots or use external tools to do this task. So please do not do so! In fact, you have no reason to do so because you are not paid based on performance.
+                    </div>
+                    
+                    <div className='text-2xl text-red-700 font-bold mb-8'>Please do not refresh the page or use the browser's back/forward buttons. Refreshing the page will lose any progress you have made and you may not receive any compensation</div>
+
+                    <div className="text-center mb-8">
+                        <img src="/cheat-icon.png" alt="No screenshots or external tools allowed" style={{maxWidth: "40%", height: "auto", display: "block", margin: "0px auto"}}/>
+                    </div>
+                    
+                    <hr style={{ marginTop: '20px', marginBottom: '20px' }} />
                 </div>
-                <div className="flex items-center mb-6">
-                    <input
-                        id="accept-terms"
-                        type="checkbox"
-                        checked={termsAccepted}
-                        onChange={() => setTermsAccepted(!termsAccepted)}
-                        className="mr-3 h-5 w-5"
-                    />
-                    <label htmlFor="accept-terms" className="text-white">
-                        I accept the terms and conditions
+                <div className="flex flex-col space-y-4 mb-6">
+                    <label className="text-xl mt-2 flex items-start text-white">
+                        <input 
+                            type="checkbox"
+                            checked={checked}
+                            onChange={handleCheck}
+                            className="mr-3 h-5 w-5 mt-1"
+                        />
+                        <span><b>I promise not to take screenshots, pictures, or use external tools to do this study. I understand that I will not be paid more if I do so and it will only ruin the experiment*</b></span>
+                    </label>
+                    <label className="text-xl mt-2 flex items-start text-white">
+                        <input 
+                            type="checkbox"
+                            checked={checkedTwo}
+                            onChange={handleCheckTwo}
+                            className="mr-3 h-5 w-5 mt-1"
+                        />
+                        <span><b>I understand the instructions above and am ready to continue*</b></span>
                     </label>
                 </div>
                 <div className="flex justify-center">
                     <button
                         onClick={agreeToTerms}
-                        disabled={!termsAccepted}
-                        className={`px-8 py-3 rounded-lg ${termsAccepted 
+                        disabled={!checked || !checkedTwo}
+                        className={`px-8 py-3 rounded-lg ${checked && checkedTwo
                             ? 'bg-purple-600 hover:bg-purple-700 text-white' 
                             : 'bg-gray-500 text-gray-300 cursor-not-allowed'
                         }`}

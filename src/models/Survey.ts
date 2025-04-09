@@ -4,12 +4,14 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface SurveyDocument extends Document {
   userId: string;
   section: string;
+  submittedAt: Date;
   data: {
     confusionLevel?: string;
     testDifficulty?: string;
     perceivedCorrectness?: string;
     learningAmount?: string;
     feedback?: string;
+    submittedAt?: string;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -28,12 +30,17 @@ const SurveySchema = new Schema(
       required: true,
       index: true
     },
+    submittedAt: { 
+      type: Date, 
+      default: Date.now 
+    },
     data: {
       confusionLevel: { type: String },
       testDifficulty: { type: String },
       perceivedCorrectness: { type: String },
       learningAmount: { type: String },
-      feedback: { type: String }
+      feedback: { type: String },
+      submittedAt: { type: String }
     }
   },
   { 

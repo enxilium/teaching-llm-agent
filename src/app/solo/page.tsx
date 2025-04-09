@@ -105,23 +105,32 @@ export default function SoloPage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            // Save to flow context instead of calling SessionService directly
-            saveSessionData({
+            // Add more detailed logging to debug the issue
+            console.log(`💾 SOLO [Session Save] Saving session with scratchboardContent length: ${scratchboardContent.length}`);
+            console.log(`💾 SOLO [Session Save] questionId: ${currentQuestion?.id || 0}`);
+            console.log(`💾 SOLO [Session Save] finalAnswer: ${finalAnswerText}`);
+            console.log(`💾 SOLO [Session Save] isCorrect: ${isCorrect}`);
+            
+            // Create the session data object
+            const sessionDataObj = {
                 questionId: currentQuestion?.id || 0,
                 questionText,
                 startTime: sessionStartTime,
                 endTime,
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
-                scratchboardContent,
+                scratchboardContent, // This is directly from the state variable
                 messages: [], // Solo mode has no messages
                 isCorrect,
                 timeoutOccurred: isTimeout
-            });
+            };
             
-            console.log('Session data saved to flow context');
+            // Save to flow context using the saveSessionData function
+            saveSessionData(sessionDataObj);
+            
+            console.log('✅ SOLO [Session Save] Data saved to flow context successfully');
         } catch (error) {
-            console.error('Error saving session data:', error);
+            console.error('❌ SOLO [Session Save] Error saving session data:', error);
         }
     };
 
@@ -157,7 +166,11 @@ export default function SoloPage() {
             correct: isCorrect
         });
         
-        // Save session data
+        // Save session data with more detailed logs
+        console.log(`💾 SOLO [Check Answer] Saving data for question ID: ${currentQuestion.id}`);
+        console.log(`💾 SOLO [Check Answer] Scratchboard content length: ${scratchboardContent.length}`);
+        
+        // Save session data immediately
         saveSessionDataToFlow(finalAnswer, false);
 
         // After a delay, allow continuing to the next stage
@@ -168,14 +181,52 @@ export default function SoloPage() {
     
     // Handle final submission
     const handleFinishLesson = () => {
+        // Log the session data before continuing to ensure it's properly saved
+        console.log('💾 SOLO [Finish] Current flow stage:', currentStage);
+        console.log('💾 SOLO [Finish] UserID:', userId);
+        
+        try {
+            // Force create a backup of data to localStorage
+            if (typeof window !== 'undefined') {
+                const flowData = JSON.parse(localStorage.getItem('flowData') || '{}');
+                console.log('💾 SOLO [Finish] Session data in flow context before continuing:', 
+                    flowData.sessionData?.length || 0, 'sessions');
+            }
+        } catch (error) {
+            console.error('Error checking flow data:', error);
+        }
+        
         // Continue to the next stage (tetris break) by directly calling completeLesson
         completeLesson();
     };
 
     // Auto-submit timeout answer
     const autoSubmitTimeoutAnswer = () => {
+        // Add logging
+        console.log('⏱️ SOLO [Auto Submit] Time limit reached, auto-submitting answer');
+        
         const submissionText = finalAnswer || '';
+        console.log(`⏱️ SOLO [Auto Submit] Final answer: "${submissionText}"`);
+        console.log(`⏱️ SOLO [Auto Submit] Scratchboard content length: ${scratchboardContent.length}`);
+        
+        // Make sure we have a valid question ID
+        if (!currentQuestion) {
+            console.error('❌ SOLO [Auto Submit] No current question found');
+            return;
+        }
+        
+        // Save session data with timeout flag
         saveSessionDataToFlow(submissionText, true);
+        
+        // Update UI to show timeout
+        setFeedback({
+            visible: true,
+            correct: false
+        });
+        
+        setTimeout(() => {
+            setShowingSolution(true);
+        }, 1500);
     };
     
     // If questions haven't loaded yet

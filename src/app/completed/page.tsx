@@ -8,6 +8,19 @@ export default function CompletedPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   
+  // Add a useEffect to handle redirection to Prolific after submission
+  useEffect(() => {
+    if (hasSubmitted) {
+      // Set a timeout to redirect to Prolific completion URL after 5 seconds
+      const redirectTimer = setTimeout(() => {
+        window.location.href = 'https://app.prolific.com/submissions/complete?cc=C13Q7C8J%27';
+      }, 5000);
+      
+      // Clean up timer if component unmounts
+      return () => clearTimeout(redirectTimer);
+    }
+  }, [hasSubmitted]);
+  
   const [surveyAnswers, setSurveyAnswers] = useState({
     confusionLevel: '',
     difficultyLevel: '',
@@ -18,10 +31,14 @@ export default function CompletedPage() {
   
   const handleInputChange = (e: { target: { name: any; value: any; }; }) => {
     const { name, value } = e.target;
-    setSurveyAnswers(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setSurveyAnswers(prev => {
+      const updated = {
+        ...prev,
+        [name]: value
+      };
+      console.log(`[DEBUG] Survey answer updated: ${name} = ${value}`);
+      return updated;
+    });
   };
   
   const handleSubmit = async (e: { preventDefault: () => void; }) => {
@@ -31,29 +48,89 @@ export default function CompletedPage() {
     setIsSubmitting(true);
     
     try {
-      console.log("Submitting survey data:", surveyAnswers);
-      
-      // First save survey data to flow context
-      saveSurveyData(surveyAnswers);
-      
-      // Log to confirm it was saved
-      console.log("Survey data saved to flow context:", surveyAnswers);
-      
-      // Add a small delay to ensure the context is updated
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Then submit all data (sessions, tests, survey) to database
-      await submitAllDataToDatabase();
-      
-      setHasSubmitted(true);
-      console.log("All data successfully submitted");
+        console.log("✅ Survey submission initiated with data:", JSON.stringify(surveyAnswers));
+        
+        // MAP field names to match database schema - these are already correct
+        const formattedSurveyData = {
+            confusionLevel: surveyAnswers.confusionLevel,
+            testDifficulty: surveyAnswers.difficultyLevel,
+            perceivedCorrectness: surveyAnswers.correctnessPerception,
+            learningAmount: surveyAnswers.learningAmount,
+            feedback: surveyAnswers.prosAndCons,
+            submittedAt: new Date().toISOString()
+        };
+        
+        // First save survey data
+        saveSurveyData(formattedSurveyData);
+        console.log("Survey data saved to context, waiting to ensure state update...");
+        
+        // CRITICAL FIX: Add a short delay to ensure state is updated before database submission
+        // This helps prevent race conditions where submission happens before React state updates
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        try {
+            // Verify the survey data has been saved in the flow data
+            if (typeof window !== 'undefined') {
+                try {
+                    const flowDataStr = localStorage.getItem('flowData');
+                    if (flowDataStr) {
+                        const flowData = JSON.parse(flowDataStr);
+                        console.log("Pre-submission flow data:", {
+                            hasSurveyData: !!flowData.surveyData,
+                            surveyFields: flowData.surveyData ? Object.keys(flowData.surveyData) : [],
+                            testCount: (flowData.testData || []).length
+                        });
+                        
+                        // Double-check that survey data exists
+                        if (!flowData.surveyData) {
+                            // If it doesn't exist, try saving it again
+                            console.warn("Survey data wasn't found in flowData, saving again...");
+                            saveSurveyData(formattedSurveyData);
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error reading flow data:", e);
+                }
+            }
+            
+            // Now submit all data to database
+            console.log("Starting database submission...");
+            await submitAllDataToDatabase();
+            console.log("✅ Database submission completed successfully");
+            setHasSubmitted(true);
+        } catch (submitError) {
+            console.error("❌ Error during database submission:", submitError);
+            
+            // Last resort - attempt direct API call with verbose error handling
+            try {
+                console.log("Attempting direct survey submission as fallback");
+                const response = await fetch('/api/submit-survey', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId,
+                        section: 'post-test',
+                        data: formattedSurveyData
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("❌ Direct survey submission failed:", errorText);
+                } else {
+                    console.log("✅ Direct survey submission successful");
+                    setHasSubmitted(true);
+                }
+            } catch (directError) {
+                console.error("❌ Direct submission also failed:", directError);
+            }
+        }
     } catch (error) {
-      console.error("Error submitting data:", error);
-      alert("There was an error submitting your data. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+        console.error("❌ Error in survey submission process:", error);
+        setIsSubmitting(false);
     }
-  };
+};
   
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8">
@@ -72,7 +149,7 @@ export default function CompletedPage() {
                   value={surveyAnswers.confusionLevel}
                   onChange={handleInputChange}
                   required
-                  className="w-full p-3 bg-white bg-opacity-10 rounded border border-gray-500 text-white"
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
                 >
                   <option value="">Select an option</option>
                   <option value="not_at_all">Not at all confused</option>
@@ -89,7 +166,7 @@ export default function CompletedPage() {
                   value={surveyAnswers.difficultyLevel}
                   onChange={handleInputChange}
                   required
-                  className="w-full p-3 bg-white bg-opacity-10 rounded border border-gray-500 text-white"
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
                 >
                   <option value="">Select an option</option>
                   <option value="very_easy">Very easy</option>
@@ -106,7 +183,7 @@ export default function CompletedPage() {
                   value={surveyAnswers.correctnessPerception}
                   onChange={handleInputChange}
                   required
-                  className="w-full p-3 bg-white bg-opacity-10 rounded border border-gray-500 text-white"
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
                 >
                   <option value="">Select an option</option>
                   <option value="yes">Yes</option>
@@ -121,7 +198,7 @@ export default function CompletedPage() {
                   value={surveyAnswers.learningAmount}
                   onChange={handleInputChange}
                   required
-                  className="w-full p-3 bg-white bg-opacity-10 rounded border border-gray-500 text-white"
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
                 >
                   <option value="">Select an option</option>
                   <option value="nothing">Nothing</option>
@@ -138,7 +215,7 @@ export default function CompletedPage() {
                   onChange={handleInputChange}
                   required
                   rows={4}
-                  className="w-full p-3 bg-white bg-opacity-10 rounded border border-gray-500 text-white"
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
                   placeholder="Please share your thoughts on what worked well and what could be improved..."
                 />
               </div>
@@ -173,7 +250,8 @@ export default function CompletedPage() {
             </svg>
             <h2 className="text-2xl font-bold mb-4">Thank You!</h2>
             <p className="mb-6">Your responses have been successfully submitted.</p>
-            <p>You may close this window now.</p>
+            <p className="mb-2">You may close this window now.</p>
+            <p className="text-yellow-300">You will be redirected to Prolific in 5 seconds...</p>
           </div>
         )}
       </div>

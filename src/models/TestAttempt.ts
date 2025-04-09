@@ -9,12 +9,43 @@ export interface TestAttemptDocument extends Document {
     userAnswer: string;
     correctAnswer: string;
     isCorrect: boolean;
+    scratchboardContent?: string;
   }[];
   score: number;
   completedAt: Date;
+  metadata?: {
+    submissionId?: string;
+    submittedAt?: Date;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
+
+const QuestionSchema = new Schema({
+  questionId: { 
+    type: Schema.Types.Mixed
+  },
+  question: { 
+    type: String,
+    default: ''
+  },
+  userAnswer: { 
+    type: String,
+    required: true,
+    default: 'No answer provided' // Add default value to satisfy requirement
+  },
+  correctAnswer: { 
+    type: String,
+    default: ''
+  },
+  isCorrect: { 
+    type: Boolean,
+    default: false
+  },
+  scratchboardContent: { 
+    type: String
+  }
+});
 
 const TestAttemptSchema = new mongoose.Schema({
   userId: { 
@@ -23,31 +54,10 @@ const TestAttemptSchema = new mongoose.Schema({
   },
   testType: { 
     type: String, 
+    enum: ['pre', 'post', 'final'], 
     required: true 
   },
-  questions: [{
-    questionId: { 
-      type: mongoose.Schema.Types.Mixed,
-      default: 0
-    },
-    question: { 
-      type: String,
-      default: ''
-    },
-    userAnswer: { 
-      type: String,
-      required: true,
-      default: 'No answer provided' // Add default value to satisfy requirement
-    },
-    correctAnswer: { 
-      type: String,
-      default: ''
-    },
-    isCorrect: { 
-      type: Boolean,
-      default: false
-    }
-  }],
+  questions: [QuestionSchema],
   score: { 
     type: Number, 
     default: 0
@@ -55,6 +65,15 @@ const TestAttemptSchema = new mongoose.Schema({
   completedAt: { 
     type: Date, 
     default: Date.now 
+  },
+  metadata: {
+    submissionId: { 
+      type: String 
+    },
+    submittedAt: { 
+      type: Date, 
+      default: Date.now 
+    }
   }
 });
 

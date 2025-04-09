@@ -237,8 +237,30 @@ export default function PeerOnlyPage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
+            // CRITICAL - Add detailed message logging
+            console.log(`💾 GROUP [Session Save] Original messages count: ${messages.length}`);
+            if (messages.length > 0) {
+                console.log(`💾 GROUP [Message Sample] First message fields: ${Object.keys(messages[0]).join(', ')}`);
+                console.log(`💾 GROUP [Message Sample] First message text: ${typeof messages[0].text === 'string' ? 
+                    messages[0].text.substring(0, 50) + '...' : 'non-string content'}`);
+                console.log(`💾 GROUP [First Message] ${JSON.stringify(messages[0]).substring(0, 100)}...`);
+                console.log(`💾 GROUP [Last Message] ${JSON.stringify(messages[messages.length-1]).substring(0, 100)}...`);
+            } else {
+                console.warn("⚠️ GROUP No messages to save!");
+            }
+            
             // Clean messages for database storage
             const cleanedMessages = prepareMessagesForStorage(messages);
+            console.log(`💾 GROUP [After Cleaning] ${cleanedMessages.length} messages remain`);
+            
+            // Add additional message verification
+            const messagesWithoutProperties = cleanedMessages.filter(msg => 
+                !msg.id || !msg.sender || !msg.text || !msg.timestamp
+            );
+            
+            if (messagesWithoutProperties.length > 0) {
+                console.warn(`⚠️ GROUP Found ${messagesWithoutProperties.length} messages with missing properties`);
+            }
 
             // Instead of calling SessionService, save to flow context
             saveToFlowContext({
@@ -254,9 +276,9 @@ export default function PeerOnlyPage() {
                 timeoutOccurred: isTimeout
             });
 
-            console.log('Session data saved to flow context');
+            console.log(`✅ GROUP Session data saved to flow context successfully with ${cleanedMessages.length} messages`);
         } catch (error) {
-            console.error('Error saving session data:', error);
+            console.error('❌ GROUP Error saving session data:', error);
         }
     };
 
@@ -547,28 +569,27 @@ export default function PeerOnlyPage() {
                 timestamp: new Date().toISOString()
             };
 
-            setMessages([userFinalAnswer]); // Start with just the user's answer
-            setHasSubmittedAnswer(true); // Mark that the answer has been submitted
+            setMessages([userFinalAnswer]);
+            setHasSubmittedAnswer(true);
             
             // Stop the timer when chat interface appears
             roundEndedRef.current = true;
 
-            // Save session data
-            saveSessionData(finalAnswer, false);
+            // Do NOT save session data here - wait until the discussion is complete
+            // This prevents duplicate session data submission
             
             // Start bot discussion after submission
-             // Reset intervention state
+            const savedMessages = [userFinalAnswer]; // Track initial messages
+            setIsQuestioningEnabled(true);
             interventionRef.current = false;
             setLastMessageTime(Date.now());
             lastTypingUpdateRef.current = Date.now();
             setTypingMessageIds([]);
             
             startBotDiscussion(currentQuestion, finalAnswer, scratchboardContent);
-            
-            // Enable questioning for follow-up
-            setIsQuestioningEnabled(true);
         });
     };
+
     // Modify startBotDiscussion to remove the word count reset
     const startBotDiscussion = (question: any, studentAnswer: string, scratchpad: string) => {
         // Reset discussion timer to 2 minutes when discussion starts
@@ -778,22 +799,25 @@ export default function PeerOnlyPage() {
 
     // Add this helper function to handle the actual message sending in group
     const sendGroupMessage = () => {
-        // Debug log to confirm function execution
-        console.log("🚀 sendGroupMessage executed with input:", input);
+        console.log("🚀 GROUP [sendGroupMessage] Starting with input:", input.substring(0, 50) + (input.length > 50 ? '...' : ''));
         
-        // Rest of your function...
         // Record user activity
         setLastUserActivityTime(Date.now());
 
         // Ensure text property is a string (not undefined)
-        const userMessage: Message = {
+        const userMessage = {
             id: getUniqueMessageId(),
             sender: 'user',
             text: input,
             timestamp: new Date().toISOString()
         };
 
-        setMessages(prev => [...prev, userMessage]);
+        // Add user message with logging
+        setMessages(prev => {
+            const newMessages = [...prev, userMessage];
+            console.log(`📝 GROUP [Message Added] User message. Total: ${newMessages.length}`);
+            return newMessages;
+        });
         
         setInput('');
         
@@ -811,14 +835,17 @@ export default function PeerOnlyPage() {
         // Check if a specific bot was mentioned
         const mentionedBot = checkForBotMention(input);
         
-        // Handle bot response based on mention
+        // Handle bot response based on mention - add logging for each case
         if (mentionedBot === 'concept') {
+            console.log("📝 GROUP [Bot Response] Concept Gap bot was mentioned specifically");
             // Generate response from Concept Gap bot
             generateSingleBotResponse(input, 'concept');
         } else if (mentionedBot === 'arithmetic') {
+            console.log("📝 GROUP [Bot Response] Arithmetic Gap bot was mentioned specifically");
             // Generate response from Arithmetic Gap bot
             generateSingleBotResponse(input, 'arithmetic');
         } else {
+            console.log("📝 GROUP [Bot Response] No specific bot mentioned, using random selection");
             // Randomly determine which bot should respond first
             let firstResponderId = Math.random() < 0.5 ? 'concept' : 'arithmetic';
             let secondResponderId = firstResponderId === 'concept' ? 'arithmetic' : 'concept';
@@ -829,17 +856,21 @@ export default function PeerOnlyPage() {
             // Create a message ID for the first responding bot
             const firstResponderMsgId = getUniqueMessageId();
             
-            // Add typing indicator for first bot
-            setMessages(prev => [...prev, {
-                id: firstResponderMsgId,
-                sender: 'ai',
-                text: '...',
-                agentId: firstResponder.id,
-                timestamp: new Date().toISOString(),
-                onComplete: () => {
-                    // Logic for second responder
-                }
-            }]);
+            // Add typing indicator for first bot with logging
+            setMessages(prev => {
+                const newMessages = [...prev, {
+                    id: firstResponderMsgId,
+                    sender: 'ai',
+                    text: '...',
+                    agentId: firstResponder.id,
+                    timestamp: new Date().toISOString(),
+                    onComplete: () => {
+                        console.log(`📝 GROUP [Message Completed] ${firstResponder.name} response complete`);
+                    }
+                }];
+                console.log(`📝 GROUP [Message Added] ${firstResponder.name} placeholder. Total: ${newMessages.length}`);
+                return newMessages;
+            });
             
             // Generate first bot response
             generateBotResponse(firstResponderMsgId, firstResponder, input, null);
@@ -1418,8 +1449,34 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                 // Handle timeout submission logic
                 const submissionText = finalAnswer.trim() || "No answer provided";
                 setHasSubmittedAnswer(true);
-                saveSessionData(submissionText, true);
-                startBotDiscussion(currentQuestion, submissionText, scratchboardContent);
+
+                // Add system message
+                const timeUpMessageId = getUniqueMessageId();
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        id: timeUpMessageId,
+                        sender: 'system',
+                        text: "Time's up! Moving to the next question...",
+                        timestamp: new Date().toISOString()
+                    }
+                ]);
+
+                // Mark as ended and disable interaction
+                roundEndedRef.current = true;
+                setIsQuestioningEnabled(false);
+
+                // CRITICAL: First save with updated messages
+                setTimeout(() => {
+                    console.log(`💬 Saving final session with ${messages.length} messages`);
+                    saveSessionData(submissionText, true);
+
+                    // Then navigate
+                    setTimeout(() => {
+                        startBotDiscussion(currentQuestion, submissionText, scratchboardContent);
+                    }, 1000);
+                }, 2000);
+
                 return;
             }
 
@@ -1456,12 +1513,16 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                 // Disable user interaction during transition
                 setIsQuestioningEnabled(false);
                 
-                // Add a longer delay before navigating to let the user see the message
-                // and ensure state updates are complete
+                // Save session data before navigating
                 setTimeout(() => {
-                    console.log('Completing lesson and transitioning to break...');
-                    completeLesson();
-                }, 3000); // Increased from 2000 to 3000ms
+                    console.log(`💬 GROUP Saving final session with ${messages.length + 1} messages`);
+                    saveSessionData(finalAnswer, false);
+                    
+                    // Then navigate after data is saved
+                    setTimeout(() => {
+                        completeLesson();
+                    }, 1000);
+                }, 1000);
                 
                 return;
             }
@@ -1498,6 +1559,25 @@ Focus on connecting key concepts from the conversation to the broader mathematic
     useEffect(() => {
         console.log(`Word count changed: ${wordCount}`);
     }, [wordCount]);
+
+    // Add this useEffect in all lesson pages
+
+    // Track when messages array changes
+    useEffect(() => {
+        // Filter out system messages
+        const userOrAiMessages = messages.filter(msg => msg.sender === 'user' || msg.sender === 'ai');
+        
+        console.log(`📝 GROUP [Messages Updated] Total count: ${userOrAiMessages.length}`);
+        
+        if (userOrAiMessages.length > 0) {
+            const latestMsg = userOrAiMessages[userOrAiMessages.length - 1];
+            console.log(`📝 GROUP [Latest Message] From ${latestMsg.sender}${latestMsg.agentId ? ' ('+latestMsg.agentId+')' : ''}: ${
+              typeof latestMsg.text === 'string' ? 
+              latestMsg.text.substring(0, 50) + (latestMsg.text.length > 50 ? '...' : '') : 
+              'non-string content'
+            }`);
+        }
+    }, [messages]);
 
     return (
         <div className="fixed inset-0 bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden">
@@ -1702,32 +1782,35 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                                 <div className="mt-3 w-full">
                                     <button 
                                         onClick={() => {
-                                            // Add skip message to conversation
-                                            const skipMessageId = getUniqueMessageId();
+                                            // Show message about moving on - EXACT SAME as timer expiration
+                                            const timeUpMessageId = getUniqueMessageId();
                                             setMessages(prev => [
                                                 ...prev,
                                                 {
-                                                    id: skipMessageId,
+                                                    id: timeUpMessageId,
                                                     sender: 'system',
-                                                    text: "Discussion skipped. Moving to the next section...",
+                                                    text: "Time's up! Moving to the next question...",
                                                     timestamp: new Date().toISOString()
                                                 }
                                             ]);
                                             
-                                            // Disable questioning during transition
-                                            setIsQuestioningEnabled(false);
-                                            
-                                            // Mark round as ended to prevent timer decrements
+                                            // IMPORTANT: Mark the round as ended to prevent further timer decrements
                                             roundEndedRef.current = true;
                                             
-                                            // Re-save session data with current messages array
-                                            saveSessionData(finalAnswer, false);
-                                            
-                                            // Navigate after a short delay
+                                            // Disable user interaction during transition
+                                            setIsQuestioningEnabled(false);
+
+                                            // CRITICAL: First save with updated messages
                                             setTimeout(() => {
-                                                console.log('Skipping group discussion and transitioning to break...');
-                                                completeLesson();
-                                            }, 1500);
+                                                console.log(`💬 Saving final session with ${messages.length} messages`);
+                                                saveSessionData(finalAnswer, false);
+
+                                                // Then navigate
+                                                setTimeout(() => {
+                                                    console.log('Completing lesson and transitioning to break...');
+                                                    completeLesson();
+                                                }, 1000);
+                                            }, 2000);
                                         }}
                                         className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
                                     >

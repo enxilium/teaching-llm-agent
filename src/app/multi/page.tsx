@@ -543,8 +543,26 @@ export default function MultiPage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
 
+            // Log raw messages before cleaning
+            console.log(`💾 MULTI [Session Save] Original messages count: ${messages.length}`);
+            if (messages.length > 0) {
+                console.log(`💾 MULTI [Message Sample] First message fields: ${Object.keys(messages[0]).join(', ')}`);
+                console.log(`💾 MULTI [Message Sample] First message text: ${messages[0].text.substring(0, 50)}...`);
+            }
+
             // Clean messages for database storage
             const cleanedMessages = prepareMessagesForStorage(messages);
+            
+            console.log(`💾 MULTI [Session Save] Saving ${messages.length} messages (${cleanedMessages.length} after cleaning)`);
+            
+            // Add additional message verification
+            const messagesWithoutProperties = cleanedMessages.filter(msg => 
+                !msg.id || !msg.sender || !msg.text || !msg.timestamp
+            );
+            
+            if (messagesWithoutProperties.length > 0) {
+                console.warn(`⚠️ MULTI Found ${messagesWithoutProperties.length} messages with missing properties`);
+            }
             
             // Save to flow context instead of calling SessionService directly
             saveToFlowContext({
@@ -560,9 +578,9 @@ export default function MultiPage() {
                 timeoutOccurred: isTimeout
             });
 
-            console.log('Session data saved to flow context');
+            console.log(`✅ MULTI [Session Save] Data saved to flow context successfully with ${cleanedMessages.length} messages`);
         } catch (error) {
-            console.error('Error saving session data:', error);
+            console.error(`❌ MULTI [Session Save] Error saving session data:`, error);
         }
     };
 
@@ -589,8 +607,8 @@ export default function MultiPage() {
             // Disable questioning initially - it will be enabled after the AI discussion sequence
             setIsQuestioningEnabled(false);
 
-            // Save session data
-            saveSessionData(finalAnswer, false);
+            // Do NOT save session data here - wait until the discussion is complete
+            // This prevents duplicate session data submission
 
             // Start classroom discussion after submission
             startClassroomDiscussion(currentQuestion, finalAnswer, scratchboardContent);
@@ -620,8 +638,8 @@ export default function MultiPage() {
         // Add message and start classroom discussion directly
         setMessages([userTimeoutMessage]);
 
-        // Save session data with timeout flag
-        saveSessionData(submissionText, true);
+        // Do NOT save session data here - wait until the discussion is complete
+        // This prevents duplicate session data submission
 
         // Use the same flow as normal submission
         startClassroomDiscussion(currentQuestion, submissionText, scratchboardContent);
@@ -701,7 +719,9 @@ export default function MultiPage() {
                                                     agentId: 'tutor',
                                                     timestamp: new Date().toISOString(),
                                                     onComplete: () => {
+                                                        console.log("Tutor analysis complete, enabling user interaction");
                                                         setIsQuestioningEnabled(true);
+                                                        setBotThinking(false);
                                                     }
                                                 }
                                             ]);
@@ -1038,61 +1058,46 @@ Your response should flow naturally like a real classroom conversation, not as a
         }
     };
 
-    // Update handleUserQuestion to allow interrupting animations
+    // Update the handleUserQuestion to separate interruption from sending
     const handleUserQuestion = () => {
         if (!input.trim()) return;
 
-        // Skip any ongoing typewriter animations and complete them immediately
+        // Skip any ongoing typewriter animations by clearing the typing IDs
         if (typingMessageIds.length > 0) {
-            // Set skip flag to true to make all current typing animations complete immediately
-            setSkipTypewriter(true);
-            
-            // Wait a tiny bit for the skip to process, then continue with sending the message
-            setTimeout(() => {
-                // Clear typing message IDs to immediately finish all animations
-                setTypingMessageIds([]);
-                
-                // Continue with sending the user's message
-                sendMultiMessage();
-            }, 50);
-        } else {
-            // No animations in progress, send message directly
-            sendMultiMessage();
+            console.log("User interrupted typewriter animation by sending a message");
+            setTypingMessageIds([]);
         }
-    };
 
-    // Add this helper function to handle the actual message sending in multi page
-    const sendMultiMessage = () => {
-        setLastUserActivityTime(Date.now());
-
-        const userMessage: Message = {
-            id: getUniqueMessageId(),
+        // Create user message
+        const userMessageId = getUniqueMessageId();
+        const userMessage = {
+            id: userMessageId,
             sender: 'user',
             text: input,
             timestamp: new Date().toISOString()
         };
 
+        // Add to messages
         setMessages(prev => [...prev, userMessage]);
-        setInput('');
+        setInput(''); // Clear input field
 
+        // Force scroll to bottom
         forceScrollToBottomRef.current = true;
         setTimeout(() => scrollToBottom(true), 50);
 
         // Check if a specific bot was mentioned
         const mentionedBot = checkForBotMention(input);
-
+        
         if (mentionedBot) {
             generateSingleBotResponse(input, mentionedBot);
         } else {
             generateSequentialResponse(input);
         }
 
-        // Reset intervention flags when user asks a question
+        // Reset intervention flags
         interventionRef.current = false;
         setLastMessageTime(Date.now());
-        
-        // Reset skip flag after setting up the new message responses
-        setTimeout(() => setSkipTypewriter(false), 50);
+        setBotThinking(false);
     };
 
     // Function for when a specific bot is mentioned
@@ -1198,90 +1203,36 @@ Focus on conceptual understanding and mathematical principles. You may make smal
 
     // Enhance sequential responses for more dynamic conversation
     const generateSequentialResponse = (userQuestion: string) => {
-        // First responder is always Tutor (teacher)
-        const tutorId = getUniqueMessageId();
-
-        // Add only Tutor's message initially
+        // CRITICAL FIX: Randomly select ONE agent from all three instead of always starting with Tutor
+        const allAgents = [...agents]; // This includes tutor, concept, and arithmetic
+        const randomIndex = Math.floor(Math.random() * allAgents.length);
+        const selectedAgent = allAgents[randomIndex];
+        
+        console.log(`Random agent selected to respond: ${selectedAgent.name}`);
+        
+        // Create message ID for the selected agent
+        const responseId = getUniqueMessageId();
+        
+        // Add message placeholder for just one agent
         setMessages(prev => [
             ...prev,
             {
-                id: tutorId,
+                id: responseId,
                 sender: 'ai',
                 text: '...',
-                agentId: 'tutor',
+                agentId: selectedAgent.id,
                 timestamp: new Date().toISOString(),
-                onTypingProgress: (progress: any) => {
-                    if (!userHasScrolledRef.current && !manualScrollOverrideRef.current) {
-                        scrollToBottom();
-                    }
-                },
-                onComplete: () => {
-                    // After tutor responds, randomly select one student to follow up
-                    setTimeout(() => {
-                        const studentId = Math.random() < 0.5 ? 'concept' : 'arithmetic';
-                        const studentResponseId = getUniqueMessageId();
-
-                        // Add student response
-                        setMessages(prev => [
-                            ...prev,
-                            {
-                                id: studentResponseId,
-                                sender: 'ai',
-                                text: '...',
-                                agentId: studentId,
-                                timestamp: new Date().toISOString(),
-                                onTypingProgress: (progress: any) => {
-                                    if (!userHasScrolledRef.current && !manualScrollOverrideRef.current) {
-                                        scrollToBottom();
-                                    }
-                                },
-                                onComplete: () => {
-                                    // Randomly determine if the other peer should also respond (70% chance)
-                                    if (Math.random() < 0.7) {
-                                        setTimeout(() => {
-                                            const otherStudentId = studentId === 'concept' ? 'arithmetic' : 'concept';
-                                            const otherStudentResponseId = getUniqueMessageId();
-
-                                            // Add the other student's response
-                                            setMessages(prev => [
-                                                ...prev,
-                                                {
-                                                    id: otherStudentResponseId,
-                                                    sender: 'ai',
-                                                    text: '...',
-                                                    agentId: otherStudentId,
-                                                    timestamp: new Date().toISOString(),
-                                                    onTypingProgress: (progress: any) => {
-                                                        if (!userHasScrolledRef.current && !manualScrollOverrideRef.current) {
-                                                            scrollToBottom();
-                                                        }
-                                                    }
-                                                }
-                                            ]);
-
-                                            // Generate the other student's response
-                                            generateStudentFollowupResponse(
-                                                otherStudentResponseId, 
-                                                otherStudentId,
-                                                userQuestion, 
-                                                tutorId,
-                                                studentResponseId
-                                            );
-                                        }, 1500 + Math.random() * 1000);
-                                    }
-                                }
-                            }
-                        ]);
-
-                        // Generate first student's response
-                        generateStudentQuestionResponse(studentResponseId, studentId, userQuestion, tutorId);
-                    }, 1500 + Math.random() * 1000);
-                }
+                // No onComplete handler that would trigger additional responses
             }
         ]);
-
-        // Generate Tutor's response to user question
-        generateTeacherQuestionResponse(tutorId, userQuestion);
+        
+        // Generate response based on which agent was selected
+        if (selectedAgent.id === 'tutor') {
+            generateTeacherQuestionResponse(responseId, userQuestion);
+        } else {
+            // For student agents (concept or arithmetic)
+            generateStudentQuestionResponse(responseId, selectedAgent.id, userQuestion, null);
+        }
     };
 
     // Add function for the second peer to respond in a conversation
@@ -1468,48 +1419,52 @@ Your answer should be laser-focused on answering exactly what they asked and not
         messageId: number, 
         studentId: string, 
         userQuestion: string,
-        teacherResponseId: number
+        teacherResponseId: number | null
     ) => {
         try {
             // Get the student agent
             const studentAgent = agents.find(a => a.id === studentId);
             if (!studentAgent) return;
 
-            // Get teacher's response
-            const teacherResponse = messages.find(m => m.id === teacherResponseId);
-            const teacherText = teacherResponse && teacherResponse.text !== '...' 
-                ? teacherResponse.text 
-                : "Let's think about this question...";
+            // Get teacher's response if available (now optional)
+            let teacherText = "";
+            if (teacherResponseId) {
+                const teacherResponse = messages.find(m => m.id === teacherResponseId);
+                if (teacherResponse && teacherResponse.text !== '...' && typeof teacherResponse.text === 'string') {
+                    teacherText = teacherResponse.text;
+                }
+            }
 
             // Format the question text
             const questionText = getQuestionText(currentQuestion);
 
+            // Build prompt with or without teacher context
             let promptText = `The current problem is: ${questionText}\n\n`;
             promptText += `A student asked: "${userQuestion}"\n\n`;
-            promptText += `The teacher (Tutor) responded: "${teacherText}\n\n`;
+            
+            // Only include teacher's response if it exists
+            if (teacherText) {
+                promptText += `The teacher (Tutor) responded: "${teacherText}"\n\n`;
+            }
 
             if (studentId === 'concept') {
-                promptText += `As Concept Gap (who is good at calculations but struggles with concepts), respond to both the student's question AND what the teacher said.
+                promptText += `As Concept Gap, respond directly to the student's question in a classroom setting.
 
 Your response should:
-1. Focus on any CALCULATION aspects related to the question
-2. Show your numerical approach to relevant parts of the problem
-3. Express some confusion about a conceptual aspect if appropriate
-4. Be helpful but sound like a student, not a teacher
-5. Potentially make a conceptual mistake while being confident in your calculations
-
-Be authentic - you're a student who's confident about arithmetic but sometimes misunderstands the deeper concepts.`;
+1. Focus on calculation approaches and step-by-step arithmetic
+2. Show your numerical approach with specific calculations
+3. Be confident about your arithmetic working
+4. Express some confusion about deeper conceptual aspects if relevant
+5. Be conversational and natural as part of a classroom discussion`;
             } else {
-                promptText += `As Arithmetic Gap (who understands concepts but makes calculation errors), respond to both the student's question AND what the teacher said.
+                promptText += `As Arithmetic Gap, respond directly to the student's question in a classroom setting.
 
 Your response should:
-1. Focus on the CONCEPTUAL aspects related to the question
-2. Explain the underlying principles or approach to the problem
-3. Make a small arithmetic error somewhere if you provide calculations
-4. Be helpful but sound like a student, not a teacher
-5. Show your strong conceptual understanding while potentially making a numerical mistake
-
-Be authentic - you're a student who deeply understands mathematical concepts but sometimes makes arithmetic errors.`;
+1. Focus on explaining the underlying concepts and principles
+2. Clearly articulate the mathematical reasoning involved
+3. Be confident about your conceptual understanding
+4. Include a minor arithmetic error somewhere in your calculations
+5. Be conversational and natural as part of a classroom discussion`;
             }
 
             // Generate student's response
@@ -1584,6 +1539,8 @@ Be authentic - you're a student who deeply understands mathematical concepts but
                         lastWordCountResetRef.current = Date.now();
                         interventionRef.current = false;
                         console.log("Tutor feedback complete, system ready for next threshold check");
+                        setIsQuestioningEnabled(true);
+                        setBotThinking(false);
                     }, 1500);
                 }
             }
@@ -1684,6 +1641,8 @@ Keep your response brief and targeted toward the most important concept that wil
                         lastWordCountResetRef.current = Date.now();
                         interventionRef.current = false;
                         console.log("Peer brainstorm complete, word count reset, intervention flag cleared");
+                        setIsQuestioningEnabled(true);
+                        setBotThinking(false);
                     }, 1000);
                 }
             }
@@ -1755,6 +1714,49 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
         }
     };
 
+    // Add this dedicated input handler function
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        // ONLY update the input value, don't trigger any sending
+        setInput(e.target.value);
+    };
+
+    // Add a safety "reset" function to fix stuck states
+    const resetStuckStates = () => {
+        console.log("Emergency reset of stuck UI states");
+        setBotThinking(false);
+        setIsQuestioningEnabled(true);
+        setTypingMessageIds([]);
+    };
+
+    // Add a failsafe timeout to clear typing states
+    useEffect(() => {
+        // Add a global safety timer to clear stuck typing indicators
+        if (typingMessageIds.length > 0) {
+            const safetyTimer = setTimeout(() => {
+                console.log("Safety timeout: clearing typing indicators");
+                setTypingMessageIds([]);
+                setBotThinking(false);
+                setIsQuestioningEnabled(true);
+            }, 30000); // 30 second maximum for any typing animation
+            
+            return () => clearTimeout(safetyTimer);
+        }
+    }, [typingMessageIds]);
+
+    // Add this effect to force isQuestioningEnabled to true after answer submission
+    useEffect(() => {
+        if (hasSubmittedAnswer && !isQuestioningEnabled) {
+            // Ensure questioning is enabled after a short delay
+            const enableTimer = setTimeout(() => {
+                console.log("Forcing questioning to be enabled");
+                setIsQuestioningEnabled(true);
+                setBotThinking(false); // Also reset the thinking state
+            }, 5000); // 5 second backup timer
+            
+            return () => clearTimeout(enableTimer);
+        }
+    }, [hasSubmittedAnswer, isQuestioningEnabled]);
+
     return (
         <div className="chat-page-container bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4">
             {!hasSubmittedAnswer ? (
@@ -1815,11 +1817,10 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                     </div>
                 </div>
             ) : (
-                // After submission - split panel layout
                 <div className="flex h-full w-full">
-                    {/* LEFT PANEL - Problem and Submission */}
-                    <div className="w-1/2 pr-2 flex flex-col h-full overflow-hidden">
-                        {/* Problem Display */}
+                    {/* Left panel - Problem Display */}
+                    <div className="w-1/2 pr-2 flex flex-col h-full">
+                        {/* Problem Display with Timer */}
                         {currentQuestion && (
                             <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400 flex-shrink-0">
                                 <div className="flex justify-between items-start mb-2">
@@ -1834,200 +1835,201 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                             </div>
                         )}
 
-                        {/* Final Answer (read-only) */}
-                        <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 flex-shrink-0">
-                            <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
-                            <div className="p-3 bg-white bg-opacity-10 text-white rounded-md">
-                                {finalAnswer}
+                        {/* Student Answer & Work Area (read-only after submission) */}
+                        <div className="bg-white bg-opacity-15 p-4 rounded-md mb-4 border-2 border-blue-400 flex-shrink-0">
+                            <h3 className="text-lg text-white font-semibold mb-2">Your Answer & Work</h3>
+                            <div className="bg-black bg-opacity-30 p-3 rounded-md mb-3">
+                                <p className="text-white"><strong>Your Answer:</strong> {finalAnswer}</p>
                             </div>
-                        </div>
-
-                        {/* Scratchboard (read-only) - make this scrollable */}
-                        <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 flex flex-col overflow-hidden">
-                            <div className="flex justify-between mb-2 flex-shrink-0">
-                                <h3 className="text-white font-semibold">Your Work</h3>
-                            </div>
-                            <div className="flex-1 bg-black bg-opacity-40 text-white rounded p-2 overflow-auto whitespace-pre-wrap">
-                                {scratchboardContent}
+                            <div className="bg-black bg-opacity-30 p-3 rounded-md overflow-auto max-h-[300px]">
+                                <p className="text-white whitespace-pre-wrap"><strong>Your Work:</strong> {scratchboardContent}</p>
                             </div>
                         </div>
                     </div>
 
-                    {/* RIGHT PANEL - Chat */}
-                    <div className="w-1/2 pl-2 flex flex-col h-full overflow-hidden chat-container">
-                        {/* Header */}
-                        <div className="bg-black bg-opacity-30 p-2 flex-shrink-0">
-                            <div className="flex space-x-3">
-                                {agents.map((agent) => (
-                                    <div key={agent.id} className="flex items-center">
-                                        <Image
-                                            src={agent.avatar}
-                                            alt={agent.name}
-                                            width={40}
-                                            height={40}
-                                            className="rounded-full border-2 border-white"
-                                        />
-                                        <span className="text-xs text-white ml-2">{agent.name}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Chat messages container - make this scrollable */}
-                        <div
-                            className="flex-1 bg-white bg-opacity-10 rounded-md overflow-y-auto overflow-x-hidden p-2 chat-messages"
-                            ref={chatContainerRef}
-                            onScroll={handleScroll}
-                        >
-                            {messages.map((msg) => (
-                                <div
-                                    key={msg.id}
-                                    className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                                >
-                                    {msg.sender === 'ai' && (
-                                        <div className="mr-2 flex-shrink-0">
-                                            <Image
-                                                src={
-                                                    agents.find((a) => a.id === msg.agentId)?.avatar ||
-                                                    '/logic_avatar.png'
-                                                }
-                                                alt={
-                                                    agents.find((a) => a.id === msg.agentId)?.name || 'AI'
-                                                }
-                                                width={40}
-                                                height={40}
-                                                className="rounded-full border-2 border-white"
-                                            />
+                    {/* Right panel - Chat Interface */}
+                    <div className="w-1/2 pl-2 flex flex-col h-full">
+                        <div className="flex-1 bg-white bg-opacity-10 rounded-md flex flex-col overflow-hidden">
+                            {/* Agent info for multi mode */}
+                            <div className="bg-black bg-opacity-30 p-2">
+                                <div className="flex space-x-3">
+                                    {agents.map(agent => (
+                                        <div key={agent.id} className="flex items-center space-x-1">
+                                            <div className="w-8 h-8 rounded-full overflow-hidden bg-purple-800 flex items-center justify-center">
+                                                <Image 
+                                                    src={`/${agent.avatar}`} 
+                                                    alt={agent.name} 
+                                                    width={32} 
+                                                    height={32}
+                                                />
+                                            </div>
+                                            <span className="text-white text-sm">{agent.name}</span>
                                         </div>
-                                    )}
+                                    ))}
+                                </div>
+                            </div>
 
+                            {/* Chat messages - Scrollable */}
+                            <div 
+                                className="flex-1 bg-white bg-opacity-10 rounded-md overflow-y-auto overflow-x-hidden p-2 chat-messages"
+                                ref={chatContainerRef}
+                                onScroll={handleScroll}
+                            >
+                                {messages.map((msg) => (
                                     <div
-                                        className={`chat-message-bubble rounded-lg p-3 ${
-                                            msg.sender === 'user'
-                                                ? 'bg-blue-600 text-white'
-                                                : msg.sender === 'system'
-                                                ? 'bg-purple-700 text-white'
-                                                : 'bg-white bg-opacity-10 text-white'
-                                        }`}
+                                        key={msg.id}
+                                        className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                                     >
                                         {msg.sender === 'ai' && (
-                                            <div className="text-sm text-gray-300 mb-1 font-bold">
-                                                {agents.find((a) => a.id === msg.agentId)?.name || 'AI'}
+                                            <div className="mr-2 flex-shrink-0">
+                                                <div className="w-8 h-8 rounded-full overflow-hidden bg-purple-800 flex items-center justify-center">
+                                                    <Image 
+                                                        src={`/${agents.find(a => a.id === msg.agentId)?.avatar || 'tutor_avatar.svg'}`}
+                                                        alt={agents.find(a => a.id === msg.agentId)?.name || 'AI'}
+                                                        width={32}
+                                                        height={32}
+                                                    />
+                                                </div>
                                             </div>
                                         )}
 
-                                        {typingMessageIds.includes(msg.id) ? (
-                                            <TypewriterTextWrapper
-                                                key={`typewriter-message-${msg.id}`}
-                                                text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
-                                                speed={20}
-                                                messageId={msg.id}
-                                                skip={skipTypewriter}
-                                                onTypingProgress={(progress) => {
-                                                    if (!userHasScrolledRef.current && !manualScrollOverrideRef.current) {
-                                                        scrollToBottom();
-                                                    }
-                                                }}
-                                                onTypingComplete={() => {
-                                                    setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
-                                                    setCompletedMessageIds(prev => [...prev, msg.id]);
+                                        <div
+                                            className={`max-w-[75%] rounded-lg p-3 chat-message-bubble ${
+                                                msg.sender === 'user'
+                                                    ? 'bg-blue-600 text-white'
+                                                    : msg.sender === 'system'
+                                                    ? 'bg-purple-700 text-white'
+                                                    : 'bg-white bg-opacity-10 text-white'
+                                            }`}
+                                        >
+                                            {msg.sender === 'ai' && (
+                                                <div className="text-sm text-gray-300 mb-1 font-bold">
+                                                    {agents.find((a) => a.id === msg.agentId)?.name || 'AI'}
+                                                </div>
+                                            )}
 
-                                                    if (msg.onComplete) {
-                                                        msg.onComplete();
-                                                    }
-
-                                                    if (!userHasScrolledRef.current && !manualScrollOverrideRef.current) {
-                                                        scrollToBottom();
-                                                    }
-                                                }}
-                                                formatMath={true}
-                                            />
-                                        ) : (
-                                            <div className="whitespace-pre-wrap break-words text-message">
-                                                {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
-                                            </div>
-                                        )}
+                                            {typingMessageIds.includes(msg.id) ? (
+                                                <TypewriterTextWrapper
+                                                    key={`typewriter-message-${msg.id}`}
+                                                    text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                                    speed={20}
+                                                    messageId={msg.id}
+                                                    skip={skipTypewriter}
+                                                    onTypingProgress={() => {
+                                                        if (!userHasScrolled) {
+                                                            scrollToBottom();
+                                                        }
+                                                    }}
+                                                    onTypingComplete={() => {
+                                                        setTypingMessageIds(prev => prev.filter(id => id !== msg.id));
+                                                        if (!userHasScrolled) {
+                                                            scrollToBottom();
+                                                        }
+                                                        if (msg.onComplete) {
+                                                            msg.onComplete();
+                                                        }
+                                                    }}
+                                                    formatMath={true}
+                                                />
+                                            ) : (
+                                                <div className="whitespace-pre-wrap break-words text-message">
+                                                    {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Footer / Chat input */}
-                        <div className="bg-black bg-opacity-30 border-t border-gray-700 p-2 flex-shrink-0 chat-input">
-                            <div className="flex space-x-2">
-                                <textarea
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    onKeyDown={handleUserQuestion}
-                                    disabled={!isQuestioningEnabled}
-                                    placeholder={isQuestioningEnabled ? "Ask a question..." : "Please wait..."}
-                                    className="flex-1 bg-white bg-opacity-10 border border-gray-700 rounded-md p-3 text-white resize-none h-16"
-                                />
-                                <button
-                                    onClick={handleUserQuestion}
-                                    disabled={!input.trim() || !isQuestioningEnabled}
-                                    className={`px-5 py-3 rounded-md ${
-                                        !input.trim() || !isQuestioningEnabled
-                                            ? 'bg-gray-700 text-gray-400'
-                                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                                    }`}
-                                >
-                                    Send
-                                </button>
+                                ))}
+                                <div key="messages-end" />
                             </div>
 
-                            {/* Skip Discussion Button */}
-                            {hasSubmittedAnswer && (
-                                <div className="mt-3 w-full">
-                                    <button 
-                                        onClick={() => {
-                                            // Add skip message to conversation
-                                            const skipMessageId = getUniqueMessageId();
-                                            setMessages(prev => [
-                                                ...prev,
-                                                {
-                                                    id: skipMessageId,
-                                                    sender: 'system',
-                                                    text: "Discussion skipped. Moving to the next section...",
-                                                    timestamp: new Date().toISOString()
+                            {/* Chat interface footer with input and proceed button */}
+                            <div className="p-3 bg-black bg-opacity-30 flex flex-col items-center">
+                                {/* Chat input if questioning is enabled */}
+                                <div className="w-full flex space-x-2 mb-2">
+                                    <textarea
+                                        value={input}
+                                        onChange={handleInputChange}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                if (input.trim() && isQuestioningEnabled && !botThinking) {
+                                                    handleUserQuestion();
                                                 }
-                                            ]);
-                                            
-                                            // Disable questioning during transition
-                                            setIsQuestioningEnabled(false);
-                                            
-                                            // Mark round as ended to prevent timer decrements
-                                            roundEndedRef.current = true;
-                                            
-                                            // Re-save session data with current messages array
+                                            }
+                                        }}
+                                        disabled={!isQuestioningEnabled || botThinking}
+                                        placeholder={
+                                            botThinking 
+                                            ? "Thinking..." 
+                                            : isQuestioningEnabled 
+                                                ? "Ask a question..." 
+                                                : "Please wait..."
+                                        }
+                                        className="flex-1 bg-white bg-opacity-10 border border-gray-700 rounded-md p-3 text-white resize-none h-16"
+                                    />
+                                    <button
+                                        onClick={handleUserQuestion}
+                                        disabled={!input.trim() || !isQuestioningEnabled || botThinking}
+                                        className={`px-5 rounded-md ${
+                                            !input.trim() || !isQuestioningEnabled || botThinking
+                                                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                                        }`}
+                                    >
+                                        Send
+                                    </button>
+                                </div>
+
+                                {/* Skip Discussion Button */}
+                                <button 
+                                    onClick={() => {
+                                        // Show message about moving on
+                                        const timeUpMessageId = getUniqueMessageId();
+                                        setMessages(prev => [
+                                            ...prev,
+                                            {
+                                                id: timeUpMessageId,
+                                                sender: 'system',
+                                                text: "Skipping to next question...",
+                                                timestamp: new Date().toISOString()
+                                            }
+                                        ]);
+                                        
+                                        // Mark the round as ended to prevent further timer decrements
+                                        roundEndedRef.current = true;
+                                        
+                                        // Disable user interaction during transition
+                                        setIsQuestioningEnabled(false);
+                                        
+                                        // Save session with updated messages BEFORE navigating
+                                        setTimeout(() => {
+                                            console.log(`💬 Saving final session with ${messages.length + 1} messages`);
                                             saveSessionData(finalAnswer, false);
                                             
-                                            // Navigate after a short delay
+                                            // Then navigate after data is saved
                                             setTimeout(() => {
-                                                console.log('Skipping classroom discussion and transitioning to break...');
                                                 completeLesson();
-                                            }, 1500);
-                                        }}
-                                        className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
-                                    >
-                                        Skip Discussion & Continue
-                                    </button>
-                                </div>
-                            )}
-
-                            {evaluationComplete && (
-                                <div className="flex justify-end p-2 mt-2">
-                                    <button
-                                        onClick={completeLesson}
-                                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md"
-                                    >
-                                        Proceed
-                                    </button>
-                                </div>
-                            )}
+                                            }, 1000);
+                                        }, 1000);
+                                    }}
+                                    className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
+                                >
+                                    Skip Discussion & Continue
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Emergency Reset Button */}
+            {process.env.NODE_ENV === 'development' && (
+                <button 
+                    onClick={resetStuckStates}
+                    className="fixed bottom-5 right-5 bg-red-600 text-white p-2 rounded text-xs"
+                >
+                    Reset UI
+                </button>
             )}
         </div>
     );

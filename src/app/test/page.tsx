@@ -69,13 +69,32 @@ function TestContent() {
     const answersRef = useRef<string[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errors, setErrors] = useState<{ work?: boolean }>({});
+    const [hasSubmittedTest, setHasSubmittedTest] = useState(false);
 
-    // Add this effect to reset the isSubmitting state when the test stage changes
+    // Update this useEffect to reset BOTH flags
     useEffect(() => {
-        // Reset submission state whenever test stage changes
+        // Reset ALL submission states whenever test stage changes
         setIsSubmitting(false);
-        console.log(`Test stage changed to ${testStage}, resetting submission state`);
-    }, [testStage]);
+        setHasSubmittedTest(false); // CRITICAL: Also reset the hasSubmittedTest flag
+        
+        console.log(`Test stage changed to ${testStage}, resetting ALL submission states`);
+        
+        // Also ensure we're working with the correct stage
+        console.log(`Current test stage: ${testStage}, Flow context stage: ${currentStage}`);
+        
+        // Clear any stuck submission timeout timers
+        const safetyCleanup = setTimeout(() => {
+            setIsSubmitting(false);
+            setHasSubmittedTest(false);
+        }, 1000);
+        
+        return () => clearTimeout(safetyCleanup);
+    }, [testStage, currentStage]);
+
+    // Also add this debugging effect to show submission state changes
+    useEffect(() => {
+        console.log(`Submission state changed - isSubmitting: ${isSubmitting}, hasSubmittedTest: ${hasSubmittedTest}`);
+    }, [isSubmitting, hasSubmittedTest]);
 
     // Update the flow protection section:
 
@@ -200,7 +219,7 @@ function TestContent() {
 
     // Updated autoSubmitTimeoutAnswer function
     const autoSubmitTimeoutAnswer = () => {
-        if (isSubmitting) return;
+        if (isSubmitting || hasSubmittedTest) return;
         setIsSubmitting(true);
 
         console.log("Time's up! Auto-submitting answer and advancing.");
@@ -214,30 +233,25 @@ function TestContent() {
             timerRef.current = null;
         }
 
-        // Record that there was no answer
+        // Record that there was no answer for current question
         const timeoutAnswer = "NO ANSWER - TIME EXPIRED";
         answersRef.current[currentQuestionIndex] = timeoutAnswer;
         setUserAnswers([...answersRef.current]);
 
-        // If this is the final question in any test, save results
-        if (currentQuestionIndex >= allQuestions.length - 1) {
-            saveTestResults(allQuestions, answersRef.current);
-        }
-
         // Advance to next question if available
         if (currentQuestionIndex < allQuestions.length - 1) {
             setCurrentQuestionIndex(currentQuestionIndex + 1);
+            setIsSubmitting(false);
         } else {
-            // This is the last question, complete the test
             handleTestCompletion();
         }
     };
 
-    // Handle test completion based on the stage
+    // Update handleTestCompletion function
     const handleTestCompletion = async () => {
-        // Prevent resubmission if already submitting
-        if (isSubmitting) {
-            console.log("Already submitting, ignoring click");
+        // Prevent duplicate submissions
+        if (isSubmitting || hasSubmittedTest) {
+            console.log("Test already submitted or submission in progress, ignoring duplicate call");
             return;
         }
         
@@ -245,112 +259,68 @@ function TestContent() {
         setIsSubmitting(true);
         console.log(`${testStage} test completion initiated`);
         
-        // Add a safety timeout to prevent UI from being stuck indefinitely
-        const safetyTimeout = setTimeout(() => {
-            console.log("Safety timeout triggered - forcing navigation");
-            if (testStage === 'final') {
-                window.location.href = '/completed';
-            } else if (testStage === 'post') {
-                window.location.href = '/test?stage=final';
-            } else {
-                window.location.href = '/';
-            }
-        }, 7000); // 7 seconds max wait time
-        
         try {
-            // Save test data to flow context
-            saveTestData({
-                testType: testStage as 'pre' | 'post' | 'final',
-                questions: allQuestions.map((q, i) => ({
-                    questionId: q.id,
+            // Create a submission ID to track this specific submission
+            const submissionId = Date.now().toString();
+            console.log(`Creating test submission with ID: ${submissionId}`);
+            
+            // CRITICAL FIX: Include scratchboard content with each question
+            const questionsWithWork = allQuestions.map((q, i) => {
+                const questionId = q.id || i;
+                // Get the scratchboard content for this specific question
+                const workContent = workingSpace[questionId] || "";
+                
+                console.log(`Question ${questionId}: Work content length: ${workContent.length} chars`);
+                
+                return {
+                    questionId: questionId,
                     question: q.question,
-                    userAnswer: userAnswers[i] || '',
+                    userAnswer: answersRef.current[i] || 'No answer provided',
                     correctAnswer: q.correctAnswer || '',
-                    isCorrect: (userAnswers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()
-                })),
-                score: Math.round((allQuestions.filter((q, i) => (userAnswers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()).length / allQuestions.length) * 100),
-                completedAt: new Date()
+                    isCorrect: (answersRef.current[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase(),
+                    // Include the scratchboard work for this question
+                    scratchboardContent: workContent
+                };
             });
             
-            // Handle the appropriate completion function with proper promise handling
+            // Save test data with the enhanced question objects
+            saveTestData({
+                testType: testStage as 'pre' | 'post' | 'final',
+                questions: questionsWithWork,
+                score: calculateScore(allQuestions, answersRef.current),
+                completedAt: new Date(),
+                submissionId
+            });
+            
+            // Mark as submitted
+            setHasSubmittedTest(true);
+            
+            // Navigate to next stage (with simplified approach)
+            console.log(`Completing ${testStage} test and navigating to next stage`);
+            
             if (testStage === 'final') {
-                console.log("Final test - calling completeFinalTest with await");
-                try {
-                    const result = await completeFinalTest();
-                    console.log("completeFinalTest resolved with:", result);
-                } catch (error) {
-                    console.error("completeFinalTest rejected with:", error);
-                    window.location.href = '/completed';
-                }
+                await completeFinalTest();
             } else if (testStage === 'post') {
-                console.log("Post test - calling completePostTest");
                 completePostTest();
             } else {
-                console.log("Pre test - calling completePreTest");
                 completePreTest();
             }
             
-            // Clear the safety timeout since we completed normally
-            clearTimeout(safetyTimeout);
-            
         } catch (error) {
             console.error("Error in handleTestCompletion:", error);
-            
-            // Clear the safety timeout
-            clearTimeout(safetyTimeout);
-            
-            // Reset submission state after 3 seconds so user can try again
-            setTimeout(() => {
-                setIsSubmitting(false);
-            }, 3000);
-            
-            // Show error message to user
-            alert("There was an error submitting your test. Please try again.");
+            setIsSubmitting(false);
         }
     };
 
-    // Function to save test results
-    const saveTestResults = (allQuestions: any[], userAnswers: string[]) => {
-        if (!allQuestions.length) return;
-        
-        const testType = testStage as 'pre' | 'post' | 'final';
-        const questions = allQuestions.map((q, i) => {
-            // Never allow empty userAnswer - use placeholder text instead
-            // Make sure we have the right answer from userAnswers
-            let userAnswer = userAnswers[i];
-            
-            // If userAnswer is empty, null, or undefined, replace with placeholder
-            if (!userAnswer || userAnswer.trim() === '') {
-                console.warn(`Empty answer detected for question ${i+1}, using placeholder`);
-                userAnswer = "No answer provided";
-            }
-            
-            return {
-                questionId: q.id,
-                question: q.question,
-                userAnswer: userAnswer, // Now guaranteed to be non-empty
-                correctAnswer: q.correctAnswer || q.answer || '',
-                isCorrect: (userAnswer.toLowerCase() === (q.correctAnswer || q.answer || '').toLowerCase())
-            };
-        });
-        
-        // Calculate score based on non-empty answers
-        const correctCount = questions.filter(q => q.isCorrect).length;
-        const score = Math.round((correctCount / questions.length) * 100);
-        
-        console.log(`Saving test data to flow: ${testType}, ${questions.length} questions`);
-        console.log('Sample question data:', JSON.stringify(questions[0]));
-        
-        // Save to Flow context with guaranteed userAnswer values
-        saveTestData({
-            testType,
-            questions,
-            score,
-            completedAt: new Date()
-        });
+    // Helper to calculate score consistently
+    const calculateScore = (questions, answers) => {
+        const correctCount = questions.filter((q, i) => 
+            (answers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()
+        ).length;
+        return Math.round((correctCount / questions.length) * 100);
     };
 
-    // Submit answer
+    // Simplify the handleSubmitAnswer function - remove timer-related code for pre/post tests
     const handleSubmitAnswer = () => {
         // Prevent resubmission if already submitting
         if (roundEndedRef.current || !currentAnswer || isSubmitting) return;
@@ -358,7 +328,7 @@ function TestContent() {
         setIsSubmitting(true);
         roundEndedRef.current = true;
 
-        // Critical: Save the current answer to the userAnswers array
+        // Save the current answer to the userAnswers array
         answersRef.current[currentQuestionIndex] = currentAnswer;
         setUserAnswers([...answersRef.current]);
         console.log(`Answer for question ${currentQuestionIndex + 1} saved:`, currentAnswer);
@@ -367,34 +337,25 @@ function TestContent() {
         const scratchboardContent = workingSpace[currentQuestion?.id || 0] || "";
         if (testStage === 'final' && !scratchboardContent.trim()) {
             setErrors(prev => ({ ...prev, work: true }));
-            setIsSubmitting(false); // Reset submission state
+            setIsSubmitting(false);
             roundEndedRef.current = false;
             return;
-        }
-
-        // Check if all questions are answered
-        const allAnswered = answersRef.current.every(a => a && a.trim() !== '');
-        setAllQuestionsAnswered(allAnswered);
-
-        // Save test results
-        if (currentQuestionIndex === allQuestions.length - 1) {
-            saveTestResults(allQuestions, answersRef.current);
         }
 
         // Handle next question or completion
         if (currentQuestionIndex < allQuestions.length - 1) {
             setCurrentQuestionIndex(currentQuestionIndex + 1);
-            // Reset submission flag after navigation to next question
             setTimeout(() => setIsSubmitting(false), 500);
+            roundEndedRef.current = false;
         } else {
             handleTestCompletion();
-            // Don't reset flag on completion since we're navigating away
         }
     };
 
-    // Updated timer effect for final test auto-redirection
+    // Modify the timer effect to only run for final test
     useEffect(() => {
-        if (roundEndedRef.current) return;
+        // Only run timer for final test questions
+        if (testStage !== 'final' || roundEndedRef.current || hasSubmittedTest) return;
 
         if (timerRef.current) {
             clearInterval(timerRef.current);
@@ -409,26 +370,16 @@ function TestContent() {
                         timerRef.current = null;
                     }
                     
-                    // For final test, always auto-submit and redirect when time expires
-                    if (testStage === 'final') {
-                        console.log('Final test time expired - redirecting to completed page');
-                        
-                        // Save the current answer (even if empty)
-                        const finalAnswer = currentAnswer.trim() || "NO ANSWER - TIME EXPIRED";
-                        answersRef.current[currentQuestionIndex] = finalAnswer;
-                        setUserAnswers([...answersRef.current]);
-                        
-                        // Save test results before navigating
-                        saveTestResults(allQuestions, answersRef.current);
-                        
-                        // Short timeout to ensure state updates before navigation
-                        setTimeout(() => {
-                            completeFinalTest();
-                        }, 500);
-                    } else {
-                        // For other test stages, use standard timeout logic
-                        setTimeout(autoSubmitTimeoutAnswer, 0);
-                    }
+                    // Auto-submit final test when time expires
+                    console.log('Final test time expired - auto-submitting');
+                    
+                    // Save the current answer (even if empty)
+                    const finalAnswer = currentAnswer.trim() || "NO ANSWER - TIME EXPIRED";
+                    answersRef.current[currentQuestionIndex] = finalAnswer;
+                    setUserAnswers([...answersRef.current]);
+                    
+                    // Auto-submit timeout answer
+                    setTimeout(autoSubmitTimeoutAnswer, 0);
                     return 0;
                 }
                 return prev - 1;
@@ -441,7 +392,7 @@ function TestContent() {
                 timerRef.current = null;
             }
         };
-    }, [currentQuestionIndex, testStage, allQuestions]);
+    }, [currentQuestionIndex, testStage, allQuestions, hasSubmittedTest]);
 
     // Handle option selection for multiple choice
     const handleOptionSelect = (option: string) => {
@@ -510,11 +461,13 @@ function TestContent() {
                                     Question {currentQuestionIndex + 1} of {allQuestions.length || 1}
                                 </p>
                             </div>
-                            <div className="bg-green-900 px-4 py-2 rounded-lg">
-                                <span className="text-white font-mono font-bold text-xl">
-                                    {formatTime(timeLeft)}
-                                </span>
-                            </div>
+                            {testStage === 'final' && (
+                                <div className="bg-green-900 px-4 py-2 rounded-lg">
+                                    <span className="text-white font-mono font-bold text-xl">
+                                        {formatTime(timeLeft)}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     </div>
 

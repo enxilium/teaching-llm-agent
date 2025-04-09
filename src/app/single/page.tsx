@@ -6,7 +6,6 @@ import Image from 'next/image';
 import { Message } from '@/utils/types';
 import TypewriterTextWrapper from '@/components/TypewriterTextWrapper';
 import { aiService, AI_MODELS } from '@/services/AI';
-import FlowProtection from '@/components/FlowProtection';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 import { useRouter } from 'next/navigation';
@@ -67,13 +66,7 @@ const formatTime = (seconds: number): string => {
 
 export default function SinglePage() {
     const router = useRouter();
-    const { 
-        completeLesson, 
-        lessonQuestionIndex, 
-        currentStage, 
-        userId,
-        saveSessionData  // Use this instead of SessionService.createSession
-    } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext } = useFlow();
     
     // Debug line to see what's happening
     console.log("SINGLE PAGE - Current stage:", currentStage, "Question index:", lessonQuestionIndex);
@@ -194,7 +187,7 @@ export default function SinglePage() {
     };
 
     // Update saveSessionData to include correctness
-    const saveLessonData = async (finalAnswerText: string, isTimeout: boolean) => {
+    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
             // Calculate session duration in seconds
             const endTime = new Date();
@@ -207,11 +200,35 @@ export default function SinglePage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
+            // Log raw messages before cleaning
+            console.log(`💾 SINGLE [Session Save] Original messages count: ${messages.length}`);
+            if (messages.length > 0) {
+                console.log(`💾 SINGLE [Message Sample] First message fields: ${Object.keys(messages[0]).join(', ')}`);
+                console.log(`💾 SINGLE [Message Sample] First message text: ${typeof messages[0].text === 'string' ? 
+                    messages[0].text.substring(0, 50) + '...' : 'non-string content'}`);
+            }
+            
             // Clean messages for database storage
             const cleanedMessages = prepareMessagesForStorage(messages);
             
-            // Instead of calling the API directly, save to context
-            saveSessionData({
+            console.log(`💾 SINGLE [Session Save] Saving ${messages.length} messages (${cleanedMessages.length} after cleaning)`);
+            
+            // Add additional message verification
+            const messagesWithoutProperties = cleanedMessages.filter(msg => 
+                !msg.id || !msg.sender || !msg.text || !msg.timestamp
+            );
+            
+            if (messagesWithoutProperties.length > 0) {
+                console.warn(`⚠️ SINGLE Found ${messagesWithoutProperties.length} messages with missing properties`);
+            }
+            
+            if (messages.length > 0) {
+                console.log(`💾 SINGLE [Session Sample] First message: ${JSON.stringify(messages[0]).substring(0, 100)}...`);
+                console.log(`💾 SINGLE [Session Sample] Last message: ${JSON.stringify(messages[messages.length-1]).substring(0, 100)}...`);
+            }
+            
+            // Save to flow context 
+            saveToFlowContext({
                 questionId: lessonQuestionIndex,
                 questionText,
                 startTime: sessionStartTime,
@@ -224,9 +241,9 @@ export default function SinglePage() {
                 timeoutOccurred: isTimeout
             });
             
-            console.log('Session data saved to flow context');
+            console.log(`✅ SINGLE [Session Save] Data saved to flow context successfully with ${cleanedMessages.length} messages`);
         } catch (error) {
-            console.error('Error saving session data:', error);
+            console.error('❌ SINGLE [Session Save] Error saving session data:', error);
         }
     };
 
@@ -241,15 +258,7 @@ export default function SinglePage() {
         // Use current values, even if empty
         const submissionText = finalAnswer.trim() || "No answer provided";
 
-        // Create a system message about timeout
-        const timeoutMessage: Message = {
-            id: getUniqueMessageId(),
-            sender: 'system',
-            text: "Time's up! Your answer has been submitted.",
-            timestamp: new Date().toISOString()
-        };
-
-        // Create a user message with the partial answer
+        // CHANGE: Remove system message, only keep user message
         const userTimeoutMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
@@ -257,11 +266,15 @@ export default function SinglePage() {
             timestamp: new Date().toISOString()
         };
 
-        // Add messages to the conversation
-        setMessages([timeoutMessage, userTimeoutMessage]);
+        // Add only user message (no system message)
+        setMessages(prev => {
+            const newMessages = [userTimeoutMessage];
+            console.log(`📝 SINGLE [Message Reset] Timeout submission. New count: ${newMessages.length}`);
+            return newMessages;
+        });
 
-        // Save session data with timeout flag
-        saveLessonData(submissionText, true);
+        // Do NOT save session data here - wait until the discussion is complete
+        // This prevents duplicate session data submission
 
         // Start conversation with Bob about the partial answer
         startConversation(currentQuestion!, submissionText, scratchboardContent);
@@ -342,17 +355,16 @@ export default function SinglePage() {
                     }
                 ]);
                 
-                // IMPORTANT FIX: Mark the round as ended to prevent further timer decrements
-                roundEndedRef.current = true;
-                
-                // Disable user interaction during transition
-                setIsQuestioningEnabled(false);
-                
-                // Navigate after a longer delay to ensure state updates are complete
+                // Save session data before navigating
                 setTimeout(() => {
-                    console.log('Completing lesson and transitioning to break...');
-                    completeLesson();
-                }, 3000); // Increase delay from 2000 to 3000ms
+                    console.log(`💬 SINGLE Saving final session with ${messages.length + 1} messages`);
+                    saveSessionData(finalAnswer.trim() || selectedOption || "No answer specified", false);
+                    
+                    // Navigate after data is saved
+                    setTimeout(() => {
+                        completeLesson();
+                    }, 1000);
+                }, 1000);
                 
                 return;
             }
@@ -445,51 +457,38 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
         return totalWords;
     };
 
-    // Update startConversation to ensure user answer is first and reset timer
+    // Start conversation with initial message from Bob
     const startConversation = (question: Question, studentAnswer: string, scratchpad: string) => {
-        // Reset discussion timer to 2 minutes
-        setTimeLeft(120);
-        roundEndedRef.current = false;
+        console.log('Starting conversation with Bob...');
         
-        // Create user answer message
+        // Create the user answer message
         const userAnswerMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
-            text: `My final answer is: ${studentAnswer}\n\nMy reasoning:\n${scratchpad}`,
+            text: `My answer: ${studentAnswer}\n\nMy work:\n${scratchpad}`,
             timestamp: new Date().toISOString()
         };
-        
-        // Create Bob's response message
-        const bobId = getUniqueMessageId();
-        const bobMessage = {
-            id: bobId,
+
+        // Create Bob's initial response (placeholder that will be replaced)
+        const bobMessage: Message = {
+            id: getUniqueMessageId(),
             sender: 'ai',
-            text: '...',
             agentId: 'bob',
-            timestamp: new Date().toISOString(),
-            onComplete: () => {
-                // Enable questioning after Bob's initial evaluation
-                setIsQuestioningEnabled(true);
-            }
+            text: "I'm looking at your solution...",
+            timestamp: new Date().toISOString()
         };
-        
-        // Set messages with user answer first, then Bob's response
+
+        // Add both messages to the state
         setMessages([userAnswerMessage, bobMessage]);
-        setTypingMessageIds([bobId]);
         
-        // Start the timer for discussion phase
-        const discussionTimerId = setInterval(() => {
-            setTimeLeft(prev => {
-                if (prev <= 1) {
-                    clearInterval(discussionTimerId);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
+        // Log to ensure messages are created
+        console.log(`💾 SINGLE [Messages Created] Initial conversation messages: ${JSON.stringify([userAnswerMessage, bobMessage])}`);
         
-        // Generate Bob's initial feedback with the new format
-        generateTeacherInitialResponse(bobId, question, studentAnswer, scratchpad);
+        // Keep track of the message ID to replace later
+        const bobMessageId = bobMessage.id;
+        
+        // Generate response
+        generateTeacherInitialResponse(bobMessageId, question, studentAnswer, scratchpad);
     };
 
     // Function to generate teacher's initial response with the new format
@@ -791,12 +790,12 @@ Use LaTeX notation with $ for any math expressions.`;
         }
     };
 
-    // Add this helper function to handle the actual message sending
+    // Replace the sendUserMessage function with this enhanced version
     const sendUserMessage = () => {
         const userMessageId = getUniqueMessageId();
         const bobResponseId = getUniqueMessageId();
 
-        // Add user message
+        // Create proper user message
         const userMessage: Message = {
             id: userMessageId,
             sender: 'user',
@@ -804,7 +803,15 @@ Use LaTeX notation with $ for any math expressions.`;
             timestamp: new Date().toISOString()
         };
 
-        // Add placeholder for Bob's response
+        // Add user message immediately with enhanced logging
+        setMessages(prev => {
+            const newMessages = [...prev, userMessage];
+            console.log(`📝 SINGLE [Message Added] User message ID ${userMessageId}. Total count: ${newMessages.length}`, 
+                       {length: input.length, preview: input.substring(0, 50) + (input.length > 50 ? '...' : '')});
+            return newMessages;
+        });
+        
+        // Create Bob's placeholder
         const bobPlaceholder: Message = {
             id: bobResponseId,
             sender: 'ai',
@@ -812,26 +819,35 @@ Use LaTeX notation with $ for any math expressions.`;
             text: '...',
             timestamp: new Date().toISOString(),
             onComplete: () => {
-                // Any actions to take when Bob's response is complete
+                // Force an update to ensure all messages are captured
+                setMessages(current => {
+                    console.log(`📝 SINGLE [Message Completed] Bob response ID ${bobResponseId}. Total count: ${current.length}`);
+                    // Return same array but forces React to recognize the update
+                    return [...current]; 
+                });
             }
         };
 
-        // Update the message list
-        setMessages(prev => [...prev, userMessage, bobPlaceholder]);
-        setTypingMessageIds(prev => [...prev, bobResponseId]);
-        setInput(''); // Clear input field
-
-        // Reset intervention flags when user asks a question
-        interventionRef.current = false;
-        setLastMessageTime(Date.now());
-
-        // Generate Bob's response
-        generateBobResponse(bobResponseId, input);
-        
-        // Reset skip flag after the new message is sent
-        setTimeout(() => setSkipTypewriter(false), 50);
+        // Add Bob's placeholder
+        setTimeout(() => {
+            setMessages(prev => {
+                const newMessages = [...prev, bobPlaceholder];
+                console.log(`📝 SINGLE [Message Added] Bob placeholder ID ${bobResponseId}. Total count: ${newMessages.length}`);
+                return newMessages;
+            });
+            
+            setTypingMessageIds(prev => [...prev, bobResponseId]);
+            
+            // Clear input and reset intervention flags
+            setInput('');
+            interventionRef.current = false;
+            setLastMessageTime(Date.now());
+            
+            // Generate Bob's response
+            generateBobResponse(bobResponseId, input);
+        }, 10);
     };
-    
+
     // Function to generate Bob's response to a user question
     const generateBobResponse = async (messageId: number, userQuestion: string) => {
         try {
@@ -1006,8 +1022,8 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
             setIsQuestioningEnabled(true); // Enable questioning
             setHasSubmittedAnswer(true); // Mark that the answer has been submitted
             
-            // Save session data
-            saveLessonData(submissionText, false);
+            // Do NOT save session data here - wait until the discussion is complete
+            // This prevents duplicate session data submission
 
             // Start conversation with Bob after submission
             startConversation(
@@ -1104,157 +1120,115 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
     
     // --- RENDER COMPONENT ---
     return (
-        <FlowProtection requiredStage="lesson">
-            <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden fixed inset-0">
-                {/* LEFT PANEL - Problem, Final Answer, Scratchboard */}
-                <div className={`${hasSubmittedAnswer ? 'w-1/2 pr-2' : 'w-full'} flex flex-col h-full overflow-hidden`}>
-                    {/* Problem Display with Timer inside */}
-                    {currentQuestion && (
-                        <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
-                            <div className="flex justify-between items-start mb-2">
-                                <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                                <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
-                                    Time: {formatTime(timeLeft)}
-                                </div>
+        <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden fixed inset-0">
+            {/* LEFT PANEL - Problem, Final Answer, Scratchboard */}
+            <div className={`${hasSubmittedAnswer ? 'w-1/2 pr-2' : 'w-full'} flex flex-col h-full overflow-hidden`}>
+                {/* Problem Display with Timer inside */}
+                {currentQuestion && (
+                    <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
+                        <div className="flex justify-between items-start mb-2">
+                            <h2 className="text-xl text-white font-semibold">Problem:</h2>
+                            <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                                Time: {formatTime(timeLeft)}
                             </div>
-                            <p className="text-white text-lg">{formatMathExpression(currentQuestion.question)}</p>
                         </div>
-                    )}
-
-                    {/* Final Answer - Now ALWAYS visible like in MultiPage */}
-                    <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
-                        <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
-                        <div className="flex flex-col space-y-3">
-                            {currentQuestion && currentQuestion.options ? (
-                                // Multiple choice final submission
-                                <div className="grid grid-cols-1 gap-3 mb-4">
-                                    {Object.entries(currentQuestion.options).map(([key, value]) => (
-                                        <button
-                                            key={key}
-                                            onClick={() => handleOptionSelect(key)}
-                                            className={`p-3 rounded-md text-left flex items-center ${
-                                                selectedOption === key 
-                                                ? 'bg-purple-700 border-2 border-purple-400' 
-                                                : 'bg-white bg-opacity-10 border border-gray-600 hover:bg-opacity-20'
-                                            } text-white`}
-                                        >
-                                            <span className="font-bold mr-2">{key}:</span> 
-                                            <span>{formatMathExpression(value)}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            ) : (
-                                // Free text input
-                                <input
-                                    type="text"
-                                    value={finalAnswer}
-                                    onChange={(e) => setFinalAnswer(e.target.value)}
-                                    placeholder="Enter your final answer here..."
-                                    className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
-                                />
-                            )}
-                            
-                            {/* Submit button - Only show if not submitted yet */}
-                            {!hasSubmittedAnswer && (
-                                <button
-                                    onClick={handleSend}
-                                    disabled={!scratchboardContent.trim() || typingMessageIds.length > 0}
-                                    className={`px-4 py-3 rounded-md text-lg font-medium ${
-                                        scratchboardContent.trim() && typingMessageIds.length === 0
-                                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                    }`}
-                                >
-                                    Submit Final Answer
-                                </button>
-                            )}
-                        </div>
+                        <p className="text-white text-lg">{formatMathExpression(currentQuestion.question)}</p>
                     </div>
+                )}
 
-                    {/* Scratchboard - Below final answer with matching styling */}
-                    <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
-                        <div className="flex justify-between mb-2">
-                            <h3 className="text-white font-semibold">Rough Work (Required)</h3>
-                        </div>
-                        <textarea
-                            value={scratchboardContent}
-                            onChange={(e) => setScratchboardContent(e.target.value)}
-                            className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
-                            placeholder="Show your work here... (required for submission)"
-                            readOnly={hasSubmittedAnswer} // Make read-only after submission
-                        />
+                {/* Final Answer - Now ALWAYS visible like in MultiPage */}
+                <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
+                    <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
+                    <div className="flex flex-col space-y-3">
+                        {currentQuestion && currentQuestion.options ? (
+                            // Multiple choice final submission
+                            <div className="grid grid-cols-1 gap-3 mb-4">
+                                {Object.entries(currentQuestion.options).map(([key, value]) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => handleOptionSelect(key)}
+                                        className={`p-3 rounded-md text-left flex items-center ${
+                                            selectedOption === key 
+                                            ? 'bg-purple-700 border-2 border-purple-400' 
+                                            : 'bg-white bg-opacity-10 border border-gray-600 hover:bg-opacity-20'
+                                        } text-white`}
+                                    >
+                                        <span className="font-bold mr-2">{key}:</span> 
+                                        <span>{formatMathExpression(value)}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            // Free text input
+                            <input
+                                type="text"
+                                value={finalAnswer}
+                                onChange={(e) => setFinalAnswer(e.target.value)}
+                                placeholder="Enter your final answer here..."
+                                className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
+                            />
+                        )}
+                        
+                        {/* Submit button - Only show if not submitted yet */}
+                        {!hasSubmittedAnswer && (
+                            <button
+                                onClick={handleSend}
+                                disabled={!scratchboardContent.trim() || typingMessageIds.length > 0}
+                                className={`px-4 py-3 rounded-md text-lg font-medium ${
+                                    scratchboardContent.trim() && typingMessageIds.length === 0
+                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                }`}
+                            >
+                                Submit Final Answer
+                            </button>
+                        )}
                     </div>
                 </div>
 
-                {/* RIGHT PANEL - Chat (only shown after submission) */}
-                {hasSubmittedAnswer && (
-                    <div className="chat-container flex-1 flex flex-col h-full overflow-hidden">
-                        {renderChatMessages()}
-
-                        <div className="mt-3 flex items-start gap-2 chat-input">
-                            <textarea
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={handleKeyDown}
-                                disabled={!isQuestioningEnabled}
-                                placeholder={isQuestioningEnabled ? "Ask a question..." : "Please wait..."}
-                                className="flex-1 bg-white bg-opacity-10 border border-gray-700 rounded-md p-3 text-white resize-none h-16"
-                            />
-                            <button
-                                onClick={handleUserQuestion}
-                                disabled={!input.trim() || !isQuestioningEnabled}
-                                className={`px-5 py-3 rounded-md ${
-                                    !input.trim() || !isQuestioningEnabled
-                                        ? 'bg-gray-700 text-gray-400'
-                                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                                }`}
-                            >
-                                Send
-                            </button>
-                        </div>
-
-                        {/* Skip Discussion Button */}
-                        {hasSubmittedAnswer && (
-                            <div className="mt-3 w-full">
-                                <button 
-                                    onClick={() => {
-                                        // Show message about skipping
-                                        const skipMessageId = getUniqueMessageId();
-                                        setMessages(prev => [
-                                            ...prev,
-                                            {
-                                                id: skipMessageId,
-                                                sender: 'system',
-                                                text: "Discussion skipped. Moving to the next section...",
-                                                timestamp: new Date().toISOString()
-                                            }
-                                        ]);
-                                        
-                                        // Disable questioning during transition
-                                        setIsQuestioningEnabled(false);
-                                        
-                                        // Mark the round as ended to prevent timer decrements
-                                        roundEndedRef.current = true;
-                                        
-                                        // Save the final message list to the context before navigating
-                                        // Re-save session data with current messages array
-                                        saveLessonData(finalAnswer, false);
-                                        
-                                        // Navigate after a short delay to ensure state updates are complete
-                                        setTimeout(() => {
-                                            console.log('Skipping discussion and transitioning to break...');
-                                            completeLesson();
-                                        }, 1500);
-                                    }}
-                                    className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
-                                >
-                                    Skip Discussion & Continue
-                                </button>
-                            </div>
-                        )}
+                {/* Scratchboard - Below final answer with matching styling */}
+                <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
+                    <div className="flex justify-between mb-2">
+                        <h3 className="text-white font-semibold">Rough Work (Required)</h3>
                     </div>
-                )}
+                    <textarea
+                        value={scratchboardContent}
+                        onChange={(e) => setScratchboardContent(e.target.value)}
+                        className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
+                        placeholder="Show your work here... (required for submission)"
+                        readOnly={hasSubmittedAnswer} // Make read-only after submission
+                    />
+                </div>
             </div>
-        </FlowProtection>
+
+            {/* RIGHT PANEL - Chat (only shown after submission) */}
+            {hasSubmittedAnswer && (
+                <div className="chat-container flex-1 flex flex-col h-full overflow-hidden">
+                    {renderChatMessages()}
+
+                    <div className="mt-3 flex items-start gap-2 chat-input">
+                        <textarea
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            disabled={!isQuestioningEnabled}
+                            placeholder={isQuestioningEnabled ? "Ask a question..." : "Please wait..."}
+                            className="flex-1 bg-white bg-opacity-10 border border-gray-700 rounded-md p-3 text-white resize-none h-16"
+                        />
+                        <button
+                            onClick={handleUserQuestion}
+                            disabled={!input.trim() || !isQuestioningEnabled}
+                            className={`px-5 py-3 rounded-md ${
+                                !input.trim() || !isQuestioningEnabled
+                                    ? 'bg-gray-700 text-gray-400'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
+                        >
+                            Send
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }
