@@ -17,6 +17,22 @@ interface TestQuestion {
     correctAnswer?: string;
 }
 
+interface TestData {
+    testType: 'pre' | 'post' | 'final';
+    questions: {
+        questionId: number;
+        question: string;
+        userAnswer: string;
+        correctAnswer: string;
+        isCorrect: boolean;
+        scratchboardContent: string;
+    }[];
+    score: number;
+    completedAt: Date;
+    submissionId: string;
+    timeoutOccurred?: boolean;
+}
+
 // Helper function to process text with math expressions - simplified version
 const formatMathExpression = (text: string) => {
     if (!text) return text;
@@ -289,7 +305,8 @@ function TestContent() {
                 questions: questionsWithWork,
                 score: calculateScore(allQuestions, answersRef.current),
                 completedAt: new Date(),
-                submissionId
+                submissionId,
+                timeoutOccurred: answersRef.current.some(answer => answer === "NO ANSWER - TIME EXPIRED")
             });
             
             // Mark as submitted

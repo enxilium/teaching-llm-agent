@@ -51,6 +51,7 @@ interface TestData {
   questions: TestQuestion[];
   score: number;
   completedAt: Date;
+  timeoutOccurred?: boolean;
 }
 
 // Survey data structure
@@ -389,7 +390,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
           }) 
         : [],
       score: typeof testData.score === 'number' ? testData.score : 0,
-      completedAt: testData.completedAt || new Date()
+      completedAt: testData.completedAt || new Date(),
+      timeoutOccurred: testData.timeoutOccurred
     };
     
     // Enhanced duplicate detection - check both test type AND submission ID

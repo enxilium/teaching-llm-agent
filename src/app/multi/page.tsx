@@ -165,6 +165,7 @@ export default function MultiPage() {
     const [lastUserActivityTime, setLastUserActivityTime] = useState(Date.now());
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
     const [skipTypewriter, setSkipTypewriter] = useState(false);
+    const [submissionTime, setSubmissionTime] = useState<Date | null>(null);
 
     // Questions from JSON
     const [allQuestions, setAllQuestions] = useState<any[]>([]);
@@ -532,8 +533,8 @@ export default function MultiPage() {
     // Modified saveSessionData function (keep everything else the same)
     const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
-            // Calculate session duration in seconds
-            const endTime = new Date();
+            // Calculate session duration in seconds using submission time
+            const endTime = submissionTime || new Date();
             const durationMs = endTime.getTime() - sessionStartTime.getTime();
             const durationSeconds = Math.floor(durationMs / 1000);
 
@@ -585,6 +586,10 @@ export default function MultiPage() {
         if (!finalAnswer.trim() || !scratchboardContent.trim()) return;
 
         setLastUserActivityTime(Date.now());
+
+        // Record submission time
+        const now = new Date();
+        setSubmissionTime(now);
 
         ensureNoTypingInProgress(() => {
             const userFinalAnswer: Message = {
@@ -1975,43 +1980,6 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                                         Send
                                     </button>
                                 </div>
-
-                                {/* Skip Discussion Button */}
-                                <button 
-                                    onClick={() => {
-                                        // Show message about moving on
-                                        const timeUpMessageId = getUniqueMessageId();
-                                        setMessages(prev => [
-                                            ...prev,
-                                            {
-                                                id: timeUpMessageId,
-                                                sender: 'system',
-                                                text: "Skipping to next question...",
-                                                timestamp: new Date().toISOString()
-                                            }
-                                        ]);
-                                        
-                                        // Mark the round as ended to prevent further timer decrements
-                                        roundEndedRef.current = true;
-                                        
-                                        // Disable user interaction during transition
-                                        setIsQuestioningEnabled(false);
-                                        
-                                        // Save session with updated messages BEFORE navigating
-                                        setTimeout(() => {
-                                            console.log(`💬 Saving final session with ${messages.length + 1} messages`);
-                                            saveSessionData(finalAnswer, false);
-                                            
-                                            // Then navigate after data is saved
-                                            setTimeout(() => {
-                                                completeLesson();
-                                            }, 1000);
-                                        }, 1000);
-                                    }}
-                                    className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
-                                >
-                                    Skip Discussion & Continue
-                                </button>
                             </div>
                         </div>
                     </div>

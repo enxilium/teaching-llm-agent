@@ -88,6 +88,7 @@ export default function SinglePage() {
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
     const [currentModel] = useState(AI_MODELS.GPT4O.id);
     const [sessionStartTime] = useState<Date>(new Date());
+    const [submissionTime, setSubmissionTime] = useState<Date | null>(null);
     const [lastMessageTime, setLastMessageTime] = useState(Date.now());
     const [wordCount, setWordCount] = useState(0);
     const [skipTypewriter, setSkipTypewriter] = useState(false);
@@ -189,8 +190,8 @@ export default function SinglePage() {
     // Update saveSessionData to include correctness
     const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
-            // Calculate session duration in seconds
-            const endTime = new Date();
+            // Calculate session duration in seconds - use submission time if available
+            const endTime = submissionTime || new Date();
             const durationMs = endTime.getTime() - sessionStartTime.getTime();
             const durationSeconds = Math.floor(durationMs / 1000);
             
@@ -250,6 +251,9 @@ export default function SinglePage() {
     // Function to handle timer expiration
     const handleTimeExpired = () => {
         console.log('Time expired - auto-submitting current answer');
+
+        // Record submission time
+        setSubmissionTime(new Date());
 
         // Prevent further edits
         setIsQuestioningEnabled(false);
@@ -1004,8 +1008,9 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
     const handleSend = () => {
         if (!scratchboardContent.trim() || typingMessageIds.length > 0) return;
 
-        // Record user activity time
-        const now = new Date().toISOString();
+        // Record user activity time and submission time
+        const now = new Date();
+        setSubmissionTime(now);
 
         ensureNoTypingInProgress(() => {
             // Use whatever final answer they have, even if empty
@@ -1015,7 +1020,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
                 id: getUniqueMessageId(),
                 sender: 'user',
                 text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${scratchboardContent}`,
-                timestamp: now
+                timestamp: now.toISOString()
             };
             
             setMessages([userFinalAnswer]); // Start with just the user's answer

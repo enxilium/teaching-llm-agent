@@ -1776,48 +1776,6 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                                     Send
                                 </button>
                             </div>
-
-                            {/* Skip Discussion Button */}
-                            {hasSubmittedAnswer && (
-                                <div className="mt-3 w-full">
-                                    <button 
-                                        onClick={() => {
-                                            // Show message about moving on - EXACT SAME as timer expiration
-                                            const timeUpMessageId = getUniqueMessageId();
-                                            setMessages(prev => [
-                                                ...prev,
-                                                {
-                                                    id: timeUpMessageId,
-                                                    sender: 'system',
-                                                    text: "Time's up! Moving to the next question...",
-                                                    timestamp: new Date().toISOString()
-                                                }
-                                            ]);
-                                            
-                                            // IMPORTANT: Mark the round as ended to prevent further timer decrements
-                                            roundEndedRef.current = true;
-                                            
-                                            // Disable user interaction during transition
-                                            setIsQuestioningEnabled(false);
-
-                                            // CRITICAL: First save with updated messages
-                                            setTimeout(() => {
-                                                console.log(`💬 Saving final session with ${messages.length} messages`);
-                                                saveSessionData(finalAnswer, false);
-
-                                                // Then navigate
-                                                setTimeout(() => {
-                                                    console.log('Completing lesson and transitioning to break...');
-                                                    completeLesson();
-                                                }, 1000);
-                                            }, 2000);
-                                        }}
-                                        className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md flex items-center justify-center"
-                                    >
-                                        Skip Discussion & Continue
-                                    </button>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
