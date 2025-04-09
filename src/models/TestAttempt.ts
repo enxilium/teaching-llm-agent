@@ -10,9 +10,11 @@ export interface TestAttemptDocument extends Document {
     correctAnswer: string;
     isCorrect: boolean;
     scratchboardContent?: string;
+    duration: number;
   }[];
   score: number;
   completedAt: Date;
+  duration: number;
   metadata?: {
     submissionId?: string;
     submittedAt?: Date;
@@ -44,6 +46,9 @@ const QuestionSchema = new Schema({
   },
   scratchboardContent: { 
     type: String
+  },
+  duration: {
+    type: Number
   }
 });
 
@@ -65,6 +70,9 @@ const TestAttemptSchema = new mongoose.Schema({
   completedAt: { 
     type: Date, 
     default: Date.now 
+  },
+  duration: {
+    type: Number
   },
   metadata: {
     submissionId: { 

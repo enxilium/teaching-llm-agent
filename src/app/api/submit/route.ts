@@ -12,6 +12,7 @@ interface Question {
   correctAnswer?: string;
   isCorrect?: boolean;
   scratchboardContent?: string;
+  duration?: number;
 }
 
 interface TestData {
@@ -20,6 +21,7 @@ interface TestData {
   completedAt?: string | Date;
   questions?: Question[];
   submissionId?: string;
+  duration?: number;
 }
 
 interface SessionData {
@@ -43,6 +45,7 @@ interface CompleteData {
   sessionData?: SessionData[];
   lessonType?: string;
   completedAt?: string | Date;
+  messages?: any[];
 }
 
 interface SubmissionResults {
@@ -134,7 +137,8 @@ export async function POST(request: NextRequest) {
                 userAnswer: q.userAnswer || '',
                 correctAnswer: q.correctAnswer || '',
                 isCorrect: !!q.isCorrect,
-                scratchboardContent: q.scratchboardContent || ''
+                scratchboardContent: q.scratchboardContent || '',
+                duration: q.duration
               })) 
             : [];
           
@@ -145,6 +149,7 @@ export async function POST(request: NextRequest) {
             score: testData.score || 0,
             completedAt: testData.completedAt ? new Date(testData.completedAt) : new Date(),
             questions: questionsData,
+            duration: testData.duration,
             metadata: {
               submissionId: testData.submissionId || Date.now().toString(),
               submittedAt: new Date()

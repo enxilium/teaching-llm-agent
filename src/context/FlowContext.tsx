@@ -2,8 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { nanoid } from 'nanoid';
-import UserService from '@/services/UserService';
 
 // Define flow stages
 type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
@@ -42,6 +40,7 @@ interface TestQuestion {
   correctAnswer: string;
   isCorrect: boolean;
   scratchboardContent?: string;
+  duration: number;
 }
 
 // Test data structure
@@ -52,6 +51,7 @@ interface TestData {
   score: number;
   completedAt: Date;
   timeoutOccurred?: boolean;
+  duration: number;
 }
 
 // Survey data structure
@@ -78,6 +78,7 @@ interface FlowData {
   lessonQuestionIndex: number;
   hitId: string;
   assignmentId: string;
+  messages?: Message[];
 }
 
 // Define context type
@@ -377,21 +378,20 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       testType: testData.testType,
       submissionId: testData.submissionId || Date.now().toString(),
       questions: Array.isArray(testData.questions) 
-        ? testData.questions.map((q: TestQuestion) => {
-            return {
-              questionId: q.questionId || 0,
-              question: typeof q.question === 'string' ? q.question : '',
-              userAnswer: typeof q.userAnswer === 'string' ? q.userAnswer : 'No answer provided',
-              correctAnswer: typeof q.correctAnswer === 'string' ? q.correctAnswer : String(q.correctAnswer || ''),
-              isCorrect: Boolean(q.isCorrect),
-              // CRITICAL FIX: Add this line to preserve scratchboard content
-              scratchboardContent: q.scratchboardContent || ''
-            };
-          }) 
+        ? testData.questions.map((q: TestQuestion) => ({
+            questionId: q.questionId || 0,
+            question: typeof q.question === 'string' ? q.question : '',
+            userAnswer: typeof q.userAnswer === 'string' ? q.userAnswer : 'No answer provided',
+            correctAnswer: typeof q.correctAnswer === 'string' ? q.correctAnswer : String(q.correctAnswer || ''),
+            isCorrect: Boolean(q.isCorrect),
+            scratchboardContent: q.scratchboardContent || '',
+            duration: q.duration
+        })) 
         : [],
       score: typeof testData.score === 'number' ? testData.score : 0,
       completedAt: testData.completedAt || new Date(),
-      timeoutOccurred: testData.timeoutOccurred
+      timeoutOccurred: testData.timeoutOccurred,
+      duration: testData.duration
     };
     
     // Enhanced duplicate detection - check both test type AND submission ID
@@ -726,9 +726,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             questionResponses: flowData.questions || [],
             surveyData: surveyDataToSubmit,
             sessionId: flowData.sessionId,
-            // Add testData and sessionData arrays to the submission
             testData: flowData.testData || [],
-            sessionData: flowData.sessionData || []
+            sessionData: flowData.sessionData || [],
+            messages: flowData.messages || []
           }),
         });
         
@@ -770,7 +770,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             sessionId: flowData.sessionId,
             // Add testData and sessionData arrays to the submission
             testData: flowData.testData || [],
-            sessionData: flowData.sessionData || []
+            sessionData: flowData.sessionData || [],
+            messages: flowData.messages || []
           }),
         });
         

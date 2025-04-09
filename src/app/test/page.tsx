@@ -9,28 +9,33 @@ import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 import TestService from '@/services/TestService';
 
-// Define test questions structure
-interface TestQuestion {
+// Define raw question structure from JSON
+interface RawQuestion {
     id: number;
     question: string;
     options?: Record<string, string>;
     correctAnswer?: string;
 }
 
+// Define test questions structure
+interface TestQuestion {
+    questionId: number;
+    question: string;
+    userAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    scratchboardContent?: string;
+    duration: number;
+}
+
 interface TestData {
     testType: 'pre' | 'post' | 'final';
-    questions: {
-        questionId: number;
-        question: string;
-        userAnswer: string;
-        correctAnswer: string;
-        isCorrect: boolean;
-        scratchboardContent: string;
-    }[];
+    questions: TestQuestion[];
     score: number;
     completedAt: Date;
     submissionId: string;
     timeoutOccurred?: boolean;
+    duration: number;
 }
 
 // Helper function to process text with math expressions - simplified version
@@ -74,7 +79,7 @@ function TestContent() {
 
     // Question state
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-    const [allQuestions, setAllQuestions] = useState<TestQuestion[]>([]);
+    const [allQuestions, setAllQuestions] = useState<RawQuestion[]>([]);
     const [userAnswers, setUserAnswers] = useState<string[]>([]);
     const [currentAnswer, setCurrentAnswer] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -86,6 +91,9 @@ function TestContent() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errors, setErrors] = useState<{ work?: boolean }>({});
     const [hasSubmittedTest, setHasSubmittedTest] = useState(false);
+
+    // Add start time tracking
+    const [startTime, setStartTime] = useState<Date | null>(null);
 
     // Update this useEffect to reset BOTH flags
     useEffect(() => {
@@ -198,7 +206,7 @@ function TestContent() {
                     const finalQuestion = data.questions[finalQuestionIndex];
                     
                     // Format for our interface
-                    const formattedQuestion = {
+                    const formattedQuestion: RawQuestion = {
                         id: 1,
                         question: finalQuestion.question,
                         correctAnswer: finalQuestion.answer
@@ -212,7 +220,7 @@ function TestContent() {
                     const response = await fetch('/test-questions.json');
                     const data = await response.json();
                     
-                    const questions = data.questions || [];
+                    const questions: RawQuestion[] = data.questions || [];
                     setAllQuestions(questions);
                 }
                 
@@ -263,7 +271,14 @@ function TestContent() {
         }
     };
 
-    // Update handleTestCompletion function
+    // Update useEffect for timer to set start time
+    useEffect(() => {
+        if (testStage === 'final' && !startTime) {
+            setStartTime(new Date());
+        }
+    }, [testStage]);
+
+    // Update handleTestCompletion to include duration
     const handleTestCompletion = async () => {
         // Prevent duplicate submissions
         if (isSubmitting || hasSubmittedTest) {
@@ -280,9 +295,13 @@ function TestContent() {
             const submissionId = Date.now().toString();
             console.log(`Creating test submission with ID: ${submissionId}`);
             
+            // Calculate duration for final test
+            const endTime = new Date();
+            const duration = startTime ? Math.floor((endTime.getTime() - startTime.getTime()) / 1000) : 0;
+            
             // CRITICAL FIX: Include scratchboard content with each question
             const questionsWithWork = allQuestions.map((q, i) => {
-                const questionId = q.id || i;
+                const questionId = q.id;
                 // Get the scratchboard content for this specific question
                 const workContent = workingSpace[questionId] || "";
                 
@@ -295,7 +314,9 @@ function TestContent() {
                     correctAnswer: q.correctAnswer || '',
                     isCorrect: (answersRef.current[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase(),
                     // Include the scratchboard work for this question
-                    scratchboardContent: workContent
+                    scratchboardContent: workContent,
+                    // Add duration for final test
+                    duration: testStage === 'final' ? duration : 0
                 };
             });
             
@@ -306,7 +327,8 @@ function TestContent() {
                 score: calculateScore(allQuestions, answersRef.current),
                 completedAt: new Date(),
                 submissionId,
-                timeoutOccurred: answersRef.current.some(answer => answer === "NO ANSWER - TIME EXPIRED")
+                timeoutOccurred: answersRef.current.some(answer => answer === "NO ANSWER - TIME EXPIRED"),
+                duration: testStage === 'final' ? duration : 0
             });
             
             // Mark as submitted
@@ -330,8 +352,8 @@ function TestContent() {
     };
 
     // Helper to calculate score consistently
-    const calculateScore = (questions: TestQuestion[], answers: string[]) => {
-        const correctCount = questions.filter((q: TestQuestion, i: number) => 
+    const calculateScore = (questions: RawQuestion[], answers: string[]) => {
+        const correctCount = questions.filter((q: RawQuestion, i: number) => 
             (answers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()
         ).length;
         return Math.round((correctCount / questions.length) * 100);
@@ -620,11 +642,12 @@ export default function TestPage() {
             if (isCorrect) score++;
             
             return {
-                questionId: question.id,
+                questionId: question.questionId,
                 question: question.question,
                 userAnswer,
                 correctAnswer,
-                isCorrect
+                isCorrect,
+                duration: 0
             };
         });
         
@@ -636,7 +659,9 @@ export default function TestPage() {
             testType,
             questions: formattedQuestions,
             score: percentScore,
-            completedAt: new Date()
+            completedAt: new Date(),
+            duration: 0,
+            submissionId: Date.now().toString()
         });
     };
     

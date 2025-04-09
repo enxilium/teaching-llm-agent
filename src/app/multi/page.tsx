@@ -608,8 +608,8 @@ export default function MultiPage() {
             // Disable questioning initially - it will be enabled after the AI discussion sequence
             setIsQuestioningEnabled(false);
 
-            // Do NOT save session data here - wait until the discussion is complete
-            // This prevents duplicate session data submission
+            // Save session data before starting discussion
+            saveSessionData(finalAnswer, false);
 
             // Start classroom discussion after submission
             startClassroomDiscussion(currentQuestion, finalAnswer, scratchboardContent);
@@ -980,9 +980,7 @@ export default function MultiPage() {
         peerMessages: { agentId: string, text: string }[]
     ) => {
         const questionText = getQuestionText(question);
-        const correctAnswer = typeof currentQuestion === 'object' && currentQuestion.correctAnswer 
-            ? currentQuestion.correctAnswer 
-            : 'not provided';
+        const correctAnswer = question?.answer || question?.correctAnswer || "not provided";
 
         try {
             // Build prompt for tutor's analysis
@@ -1757,6 +1755,21 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
             return () => clearTimeout(enableTimer);
         }
     }, [hasSubmittedAnswer, isQuestioningEnabled]);
+
+    // Update handleTimeExpired to save session data and complete lesson
+    const handleTimeExpired = async () => {
+        if (hasSubmittedAnswer) return;
+        
+        const now = new Date();
+        setSubmissionTime(now);
+        setHasSubmittedAnswer(true);
+        
+        // Save session data with timeout flag
+        await saveSessionData(finalAnswer || "No answer provided", true);
+        
+        // Complete the lesson
+        completeLesson();
+    };
 
     return (
         <div className="chat-page-container bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4">

@@ -10,6 +10,7 @@ interface Question {
   correctAnswer?: string;
   isCorrect?: boolean;
   scratchboardContent?: string;
+  duration?: number;
 }
 
 interface TestData {
@@ -81,8 +82,8 @@ export async function POST(request: NextRequest) {
           userAnswer: q.userAnswer || '',
           correctAnswer: q.correctAnswer || '',
           isCorrect: !!q.isCorrect,
-          // CRITICAL: Use direct assignment instead of Mongoose constructor
-          scratchboardContent: q.scratchboardContent || ''
+          scratchboardContent: q.scratchboardContent || '',
+          duration: q.duration
         })) 
       : [];
     
