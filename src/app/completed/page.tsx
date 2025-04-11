@@ -135,12 +135,9 @@ export default function CompletedPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8">
       <div className="max-w-4xl mx-auto bg-white bg-opacity-10 p-8 rounded-xl text-white">
-        <h1 className="text-4xl font-bold mb-6">Completed!</h1>
-        
         {!hasSubmitted ? (
           <>
-            <p className="mb-6">Thank you for participating in this study. Before you go, please complete this brief survey:</p>
-            
+            <p className="mb-6">Please answer the following questions. You must complete these and click submit below to complete the task and get paid.</p>
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block mb-2">How confused did you feel during the lesson?</label>
@@ -216,7 +213,7 @@ export default function CompletedPage() {
                   required
                   rows={4}
                   className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
-                  placeholder="Please share your thoughts on what worked well and what could be improved..."
+                  placeholder="Please share your thoughts on how helpful the lesson was and what could be improved..."
                 />
               </div>
               
@@ -229,6 +226,8 @@ export default function CompletedPage() {
                     : 'bg-blue-600 hover:bg-blue-700'
                 } text-white font-medium flex items-center justify-center`}
               >
+              
+              <p> Thank you for participating in this study! </p>
                 {isSubmitting ? (
                   <>
                     <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -250,7 +249,6 @@ export default function CompletedPage() {
             </svg>
             <h2 className="text-2xl font-bold mb-4">Thank You!</h2>
             <p className="mb-6">Your responses have been successfully submitted.</p>
-            <p className="mb-2">You may close this window now.</p>
             <p className="text-yellow-300">You will be redirected to Prolific in 5 seconds...</p>
           </div>
         )}

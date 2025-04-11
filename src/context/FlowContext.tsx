@@ -76,6 +76,8 @@ interface FlowData {
   currentStage: FlowStage;
   lessonType: LessonType | null;
   lessonQuestionIndex: number;
+  testQuestionIndex: number;
+  scenarioFixed: boolean;
   hitId: string;
   assignmentId: string;
   messages?: Message[];
@@ -87,6 +89,7 @@ interface FlowContextType {
   currentStage: FlowStage;
   lessonType: LessonType | null;
   lessonQuestionIndex: number;
+  testQuestionIndex: number;
   hitId: string;
   assignmentId: string;
   
@@ -114,6 +117,8 @@ const defaultFlowData: FlowData = {
   currentStage: 'terms',
   lessonType: null,
   lessonQuestionIndex: 0,
+  testQuestionIndex: 0,
+  scenarioFixed: false,
   sessionData: [],
   testData: [],
   surveyData: null,
@@ -130,6 +135,7 @@ const FlowContext = createContext<FlowContextType>({
   currentStage: 'terms',
   lessonType: null,
   lessonQuestionIndex: 0,
+  testQuestionIndex: 0,
   hitId: '',
   assignmentId: '',
   
@@ -162,7 +168,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   
   // Extract common values from flowData for easier access
-  const { userId, currentStage, lessonType, lessonQuestionIndex, hitId, assignmentId } = flowData;
+  const { userId, currentStage, lessonType, lessonQuestionIndex, testQuestionIndex, hitId, assignmentId } = flowData;
 
   // Add this near the top of your FlowProvider component
   const transitionInProgressRef = useRef(false);
@@ -174,6 +180,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     let hitId = '';
     let assignmentId = '';
     
+    console.log("========== FLOW INITIALIZATION ==========");
+    
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const workerIdParam = urlParams.get('workerId');
@@ -183,29 +191,65 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       // Use workerId as userId if available
       if (workerIdParam) {
         newUserId = workerIdParam;
-        console.log(`Using Prolific workerId as userId: ${newUserId}`);
+        console.log(`📋 User ID: ${newUserId} (from workerId parameter)`);
       } else {
-        console.log(`No workerId found, using development userId: ${newUserId}`);
+        console.log(`📋 User ID: ${newUserId} (generated for development)`);
       }
       
       // Store hitId and assignmentId if available
       if (hitIdParam) {
         hitId = hitIdParam;
+        console.log(`📋 HIT ID: ${hitId}`);
       }
       
       if (assignmentIdParam) {
         assignmentId = assignmentIdParam;
+        console.log(`📋 Assignment ID: ${assignmentId}`);
       }
-      
-      console.log(`Query parameters - workerId: ${workerIdParam}, hitId: ${hitIdParam}, assignmentId: ${assignmentIdParam}`);
     }
     
+    // Determine scenario and questions deterministically at the start
+    // Use a consistent method based on userId to ensure the same selection across sessions
+    let scenarioSeed = 0;
+    for (let i = 0; i < newUserId.length; i++) {
+        scenarioSeed += newUserId.charCodeAt(i);
+    }
+    console.log(`🔢 Scenario seed value: ${scenarioSeed} (derived from User ID)`);
+    
+    // Select lesson type (scenario) using deterministic approach
+    const lessonTypes: LessonType[] = ['group', 'multi', 'single', 'solo'];
+    const lessonTypeIndex = scenarioSeed % lessonTypes.length;
+    const selectedLessonType = lessonTypes[lessonTypeIndex];
+    console.log(`🎯 SCENARIO SELECTION: ${selectedLessonType} (index ${lessonTypeIndex} of ${lessonTypes.length})`);
+    
+    // Generate a different seed for question selection to make it independent
+    let questionSeed = 0;
+    // Use a different part of the userId or combine it differently
+    for (let i = newUserId.length - 1; i >= 0; i--) {
+        questionSeed = (questionSeed * 31 + newUserId.charCodeAt(i)) % 1000000007;
+    }
+    
+    // Select question indices deterministically but independently
+    const sessionQuestionIndex = Math.abs(questionSeed % 2); // For small question pool, just use 0 or 1
+    
+    // Make sure test question is different from lesson question
+    // If sessionQuestionIndex is 0, use 1; if it's 1, use 0
+    const testQuestionIndex = sessionQuestionIndex === 0 ? 1 : 0;
+    
+    console.log(`❓ QUESTION SELECTIONS:`);
+    console.log(`   - Lesson question index: ${sessionQuestionIndex} (used in ${selectedLessonType} scenario)`);
+    console.log(`   - Test question index: ${testQuestionIndex} (used in final test)`);
+    console.log("=========================================");
+    
     const newFlowData: FlowData = {
-      ...defaultFlowData,
-      userId: newUserId,
-      hitId: hitId,
-      assignmentId: assignmentId,
-      lessonQuestionIndex: Math.floor(Math.random() * 2),
+        ...defaultFlowData,
+        userId: newUserId,
+        hitId: hitId,
+        assignmentId: assignmentId,
+        lessonType: selectedLessonType,
+        lessonQuestionIndex: sessionQuestionIndex,
+        testQuestionIndex: testQuestionIndex,
+        scenarioFixed: true
     };
     
     setFlowData(newFlowData);
@@ -288,7 +332,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     const sanitizedSessionData = {
       ...sessionData,
       scratchboardContent: sessionData.scratchboardContent || '',
-      messages: messagesCopy
+      messages: messagesCopy,
+      lessonType: lessonType // Add lessonType from the flow context
     };
     
     // Update state with atomic operation
@@ -298,6 +343,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         sessionData: [...(prev.sessionData || []), {
           ...sanitizedSessionData,
           userId,
+          lessonType: lessonType, // Ensure lessonType is included
           _savedAt: new Date().toISOString() // Add timestamp for tracking
         }]
       };
@@ -312,11 +358,12 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             questionId: sanitizedSessionData.questionId,
             messages: sanitizedSessionData.messages,
             scratchboardContent: sanitizedSessionData.scratchboardContent,
+            lessonType: lessonType, // Include lessonType in the backup
             _savedAt: new Date().toISOString()
           };
           localStorage.setItem(`session_backup_${sanitizedSessionData.questionId}`, JSON.stringify(sessionBackup));
           
-          console.log(`💾 Session ${sanitizedSessionData.questionId} backed up to localStorage with ${sanitizedSessionData.messages.length} messages`);
+          console.log(`💾 Session ${sanitizedSessionData.questionId} backed up to localStorage with ${sanitizedSessionData.messages.length} messages, scenario type: ${lessonType}`);
         } catch (e) {
           console.error("Error saving to localStorage:", e);
         }
@@ -514,32 +561,29 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const completePreTest = () => {
     console.log("Starting pre-test completion transition");
     
-    // Select random lesson type
-    const lessonTypes: LessonType[] = ['group', 'multi', 'single', 'solo'];
-    const randomLessonType = lessonTypes[Math.floor(Math.random() * lessonTypes.length)];
-    console.log(`Selected random lesson: ${randomLessonType}`);
+    // Extract the predetermined lesson type
+    const selectedLessonType = flowData.lessonType || 'solo'; // Default to solo if not set
+    console.log(`Using predetermined lesson type: ${selectedLessonType}`);
     
     // Update state
     setFlowData(prev => ({
         ...prev,
-        currentStage: 'lesson',
-        lessonType: randomLessonType
+        currentStage: 'lesson'
     }));
     
     // Update localStorage
     if (typeof window !== 'undefined') {
         localStorage.setItem('currentStage', 'lesson');
-        localStorage.setItem('lessonType', randomLessonType);
     }
     
     // Navigate with delay to allow state to update
     setTimeout(() => {
         try {
-            router.push(`/${randomLessonType}`);
+            router.push(`/${selectedLessonType}`);
         } catch (error) {
             console.error("Navigation error:", error);
             // Fallback direct navigation
-            window.location.href = `/${randomLessonType}`;
+            window.location.href = `/${selectedLessonType}`;
         }
     }, 300);
   };
@@ -712,6 +756,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       // Now check if we have survey data to submit
       if (surveyDataToSubmit) {
         console.log("📤 Submitting with survey data:", surveyDataToSubmit);
+        console.log("📤 Scenario type (lessonType):", flowData.lessonType);
         
         // Final submission with all required data
         const response = await fetch('/api/submit', {
@@ -728,7 +773,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             sessionId: flowData.sessionId,
             testData: flowData.testData || [],
             sessionData: flowData.sessionData || [],
-            messages: flowData.messages || []
+            messages: flowData.messages || [],
+            lessonType: flowData.lessonType // Add lessonType to the submission
           }),
         });
         
@@ -750,6 +796,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Create a fallback submission without survey data as last resort
         console.error("❌ No survey data found for submission - sending partial data");
+        console.log("📤 Scenario type (lessonType):", flowData.lessonType);
         
         const response = await fetch('/api/submit', {
           method: 'POST',
@@ -771,7 +818,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             // Add testData and sessionData arrays to the submission
             testData: flowData.testData || [],
             sessionData: flowData.sessionData || [],
-            messages: flowData.messages || []
+            messages: flowData.messages || [],
+            lessonType: flowData.lessonType // Add lessonType to the submission
           }),
         });
         
@@ -799,6 +847,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     currentStage,
     lessonType,
     lessonQuestionIndex,
+    testQuestionIndex,
     hitId,
     assignmentId,
     
@@ -819,6 +868,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     userId,
     lessonType,
     lessonQuestionIndex,
+    testQuestionIndex,
     hitId,
     assignmentId,
     flowData,

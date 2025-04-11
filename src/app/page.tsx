@@ -8,7 +8,7 @@ import CaptchaComponent from '@/components/Captcha';
 type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
 
 export default function Terms() {
-    const { agreeToTerms } = useFlow();
+    const { agreeToTerms, lessonType } = useFlow();
     const [termsAccepted, setTermsAccepted] = useState(false);
     const [checked, setChecked] = useState(false);
     const [checkedTwo, setCheckedTwo] = useState(false);
@@ -66,6 +66,21 @@ export default function Terms() {
                     <p className="mb-4">
                         Researchers at the University of Toronto are studying how people's usage of Artificial Intelligence impacts their creative thinking abilities. Nowadays, people are often offloading tedious cognitive tasks to various AI tools to boost productivity and save time. Our project investigates the implications this has on human creativity.
                     </p>
+
+                    <p className="mb-4">In this task, you will solve multiple-choice math problems about exponents. After some practice questions, you will receive feedback in a “Lesson” round, then move on to more similar questions in a “Test” round. The problems are similar to those commonly found on standardized tests.</p>
+                    
+                    {/* Scenario description based on lessonType */}
+                    <p className="mb-4 bg-purple-900 bg-opacity-50 p-3 rounded-lg border border-purple-500">
+                        {lessonType === 'solo' && 
+                            "After solving the practice problems, you will receive brief feedback on your answers."}
+                        {lessonType === 'single' && 
+                            "After solving the practice problems, you will receive feedback from an AI tutor. You may also ask the tutor questions to help you prepare for the test."}
+                        {lessonType === 'group' && 
+                            "After solving the practice problems, you will see how your AI 'peers' (other AI agents) solved them. You may discuss the problem in a group setting before the test."}
+                        {lessonType === 'multi' && 
+                            "After solving the practice problems, you will receive feedback from an AI tutor alongside AI 'peers' (other AI agents). You may discuss the problem with both the tutor and your peers before the test."}
+                    </p>
+                    
                     <p className="mb-4">
                         By clicking the survey, you agree that:
                         <br />

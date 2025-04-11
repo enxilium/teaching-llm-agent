@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 import TestService from '@/services/TestService';
+import { v4 as uuidv4 } from 'uuid';
 
 // Define raw question structure from JSON
 interface RawQuestion {
@@ -26,6 +27,7 @@ interface TestQuestion {
     isCorrect: boolean;
     scratchboardContent?: string;
     duration: number;
+    options?: Record<string, string | number>;
 }
 
 interface TestData {
@@ -69,17 +71,19 @@ function TestContent() {
         lessonQuestionIndex,
         currentStage,
         userId,
-        saveTestData
+        saveTestData,
+        testQuestionIndex
     } = useFlow();
 
-    // Timer state
-    const [timeLeft, setTimeLeft] = useState(120); // 2 minutes per question
+    // Timer state - changed from timeLeft to timeElapsed for counting up
+    const [timeElapsed, setTimeElapsed] = useState(0); 
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const roundEndedRef = useRef(false);
 
     // Question state
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [allQuestions, setAllQuestions] = useState<RawQuestion[]>([]);
+    const [selectedQuestions, setSelectedQuestions] = useState<RawQuestion[]>([]);
     const [userAnswers, setUserAnswers] = useState<string[]>([]);
     const [currentAnswer, setCurrentAnswer] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -91,17 +95,23 @@ function TestContent() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errors, setErrors] = useState<{ work?: boolean }>({});
     const [hasSubmittedTest, setHasSubmittedTest] = useState(false);
+    // Add state to track if enough time has elapsed for submission
+    const [canSubmit, setCanSubmit] = useState(false);
 
     // Add start time tracking
     const [startTime, setStartTime] = useState<Date | null>(null);
+
+    // Add canSubmitRef to ensure consistent tracking
+    const canSubmitRef = useRef(false);
 
     // Update this useEffect to reset BOTH flags
     useEffect(() => {
         // Reset ALL submission states whenever test stage changes
         setIsSubmitting(false);
         setHasSubmittedTest(false); // CRITICAL: Also reset the hasSubmittedTest flag
+        setCurrentQuestionIndex(0); // Reset the question index
         
-        console.log(`Test stage changed to ${testStage}, resetting ALL submission states`);
+        console.log(`Test stage changed to ${testStage}, resetting ALL submission states and question index`);
         
         // Also ensure we're working with the correct stage
         console.log(`Current test stage: ${testStage}, Flow context stage: ${currentStage}`);
@@ -131,7 +141,7 @@ function TestContent() {
         // Later we can add it back with better logic
     }, [testStage, currentStage]);
 
-    // Format time function
+    // Format time function - same logic works for elapsed time too
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
@@ -145,10 +155,10 @@ function TestContent() {
         // Create a properly sized array
         let updatedAnswers: string[];
 
-        if (userAnswers.length === 0 && allQuestions.length > 0) {
-            updatedAnswers = new Array(allQuestions.length).fill('');
-        } else if (userAnswers.length < allQuestions.length) {
-            updatedAnswers = new Array(allQuestions.length).fill('');
+        if (userAnswers.length === 0 && selectedQuestions.length > 0) {
+            updatedAnswers = new Array(selectedQuestions.length).fill('');
+        } else if (userAnswers.length < selectedQuestions.length) {
+            updatedAnswers = new Array(selectedQuestions.length).fill('');
             userAnswers.forEach((ans, i) => {
                 updatedAnswers[i] = ans;
             });
@@ -164,8 +174,8 @@ function TestContent() {
 
     // Initialize user answers array
     useEffect(() => {
-        if (allQuestions.length > 0 && (userAnswers.length === 0 || userAnswers.length !== allQuestions.length)) {
-            const newAnswers = new Array(allQuestions.length).fill('');
+        if (selectedQuestions.length > 0 && (userAnswers.length === 0 || userAnswers.length !== selectedQuestions.length)) {
+            const newAnswers = new Array(selectedQuestions.length).fill('');
             
             if (userAnswers.length > 0) {
                 userAnswers.forEach((ans, idx) => {
@@ -178,11 +188,15 @@ function TestContent() {
             setUserAnswers(newAnswers);
             answersRef.current = newAnswers;
         }
-    }, [allQuestions, userAnswers.length]);
+    }, [selectedQuestions, userAnswers.length]);
 
-    // Reset timer when changing questions
+    // Reset timer when changing questions - now reset to 0 for counting up
     useEffect(() => {
-        setTimeLeft(120);
+        // Only reset timer for final tests
+        if (testStage === 'final') {
+            setTimeElapsed(0);
+        }
+        
         roundEndedRef.current = false;
 
         if (answersRef.current && answersRef.current[currentQuestionIndex]) {
@@ -190,66 +204,108 @@ function TestContent() {
         } else {
             setCurrentAnswer('');
         }
-    }, [currentQuestionIndex]);
+    }, [currentQuestionIndex, testStage]);
 
-    // Load the appropriate questions based on the test stage
+    // First, let's add the getRandomIndices function if it doesn't exist already
+    const getRandomIndices = (max: number, count: number): number[] => {
+        // Create array of all possible indices
+        const allIndices = Array.from({ length: max }, (_, i) => i);
+        
+        // Shuffle array and take first 'count' elements
+        for (let i = allIndices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [allIndices[i], allIndices[j]] = [allIndices[j], allIndices[i]];
+        }
+        
+        return allIndices.slice(0, count);
+    };
+
+    // Now update the loadQuestions function in the useEffect to use the selectQuestionForStage
     useEffect(() => {
         const loadQuestions = async () => {
             try {
-                if (testStage === 'final') {
-                    // For final test, load from questions.json and show only one question
-                    const response = await fetch('/questions.json');
-                    const data = await response.json();
-                    
-                    // Get the question that wasn't shown in the lesson
-                    const finalQuestionIndex = lessonQuestionIndex === 0 ? 1 : 0;
-                    const finalQuestion = data.questions[finalQuestionIndex];
-                    
-                    // Format for our interface
-                    const formattedQuestion: RawQuestion = {
-                        id: 1,
-                        question: finalQuestion.question,
-                        correctAnswer: finalQuestion.answer
-                    };
-                    
-                    setAllQuestions([formattedQuestion]);
-                    // Reset the current index specifically for final test
-                    setCurrentQuestionIndex(0);
-                } else {
-                    // For pre-test and post-test, load the conceptual questions
-                    const response = await fetch('/test-questions.json');
-                    const data = await response.json();
-                    
-                    const questions: RawQuestion[] = data.questions || [];
-                    setAllQuestions(questions);
+                let questionsToLoad: RawQuestion[] = [];
+                
+                // Record the start time
+                setStartTime(new Date());
+                
+                // Determine which question source to use based on test stage
+                const questionSource = testStage === 'final' ? '/questions.json' : '/test-questions.json';
+                console.log(`Loading questions from ${questionSource} for ${testStage} test`);
+                
+                // Reset UI state for new test stage
+                setCurrentQuestionIndex(0);
+                console.log(`Reset currentQuestionIndex to 0 for ${testStage} test`);
+                
+                // Load questions from appropriate source
+                const response = await fetch(questionSource);
+                if (!response.ok) {
+                    throw new Error(`Failed to load questions from ${questionSource}`);
                 }
                 
-                setIsLoading(false);
+                const data = await response.json();
+                
+                if (data && data.questions) {
+                    const allAvailableQuestions = data.questions;
+                    setAllQuestions(allAvailableQuestions);
+                    
+                    // Use selectQuestionForStage to determine which questions to show
+                    const selectedQuestions = selectQuestionForStage(allAvailableQuestions);
+                    questionsToLoad = selectedQuestions;
+                    
+                    // Store the selected questions in state
+                    setSelectedQuestions(selectedQuestions);
+                    
+                    // Initialize user answers array
+                    const initialAnswers = new Array(questionsToLoad.length).fill('');
+                    setUserAnswers(initialAnswers);
+                    answersRef.current = initialAnswers;
+                    
+                    console.log(`Loaded ${questionsToLoad.length} questions for ${testStage} test`);
+                    console.log(`Selected questions: ${JSON.stringify(selectedQuestions.map(q => q.id))}`);
+                    setIsLoading(false);
+                }
             } catch (error) {
-                console.error("Error loading questions:", error);
+                console.error('Error loading questions:', error);
+                setIsLoading(false);
             }
-            
-            // Reset current index and ensure proper initialization
-            setCurrentQuestionIndex(0);
-            
-            // Initialize empty answers
-            const emptyAnswers = new Array(allQuestions.length).fill('');
-            setUserAnswers(emptyAnswers);
-            answersRef.current = emptyAnswers;
         };
-
+        
         loadQuestions();
-    }, [testStage, lessonQuestionIndex]);
+    }, [testStage, testQuestionIndex]);
 
-    // Updated autoSubmitTimeoutAnswer function
-    const autoSubmitTimeoutAnswer = () => {
+    // Implement the selectQuestionForStage function to use testQuestionIndex for final tests
+    const selectQuestionForStage = (questionPool: RawQuestion[]): RawQuestion[] => {
+        let selectedIndices: number[] = [];
+        
+        console.log(`Selecting questions for stage: ${testStage}, total available: ${questionPool.length}`);
+        
+        if (testStage === 'pre' || testStage === 'post') {
+            // For pre and post tests, use questions from test-questions.json
+            // We can use all questions or select a subset
+            const questionCount = Math.min(5, questionPool.length); // Use at most 5 questions
+            selectedIndices = getRandomIndices(questionPool.length, questionCount);
+            console.log(`Selected ${questionCount} random questions for ${testStage} test: indices ${selectedIndices.join(', ')}`);
+        } else if (testStage === 'final') {
+            // For final test, use the predetermined testQuestionIndex from flow context
+            // and the questions.json file
+            const mappedIndex = testQuestionIndex % questionPool.length;
+            selectedIndices = [mappedIndex];
+            console.log(`Using predetermined test question index: ${testQuestionIndex} (mapped to ${mappedIndex}) for final test`);
+            console.log(`Question pool size: ${questionPool.length}, selected question: ${JSON.stringify(questionPool[mappedIndex])}`);
+        }
+        
+        // Map selected indices to actual questions
+        const result = selectedIndices.map(index => questionPool[index]);
+        console.log(`Returning ${result.length} selected questions`);
+        return result;
+    };
+
+    // Updated handleTestCompletion to use elapsed time
+    const handleTestCompletion = async () => {
         if (isSubmitting || hasSubmittedTest) return;
         setIsSubmitting(true);
-
-        console.log("Time's up! Auto-submitting answer and advancing.");
-
-        if (roundEndedRef.current) return;
-        roundEndedRef.current = true;
+        setHasSubmittedTest(true);
 
         // Stop the timer
         if (timerRef.current) {
@@ -257,115 +313,129 @@ function TestContent() {
             timerRef.current = null;
         }
 
-        // Record that there was no answer for current question
-        const timeoutAnswer = "NO ANSWER - TIME EXPIRED";
-        answersRef.current[currentQuestionIndex] = timeoutAnswer;
-        setUserAnswers([...answersRef.current]);
+        console.log("Test completed, preparing submission...");
 
-        // Advance to next question if available
-        if (currentQuestionIndex < allQuestions.length - 1) {
-            setCurrentQuestionIndex(currentQuestionIndex + 1);
-            setIsSubmitting(false);
-        } else {
-            handleTestCompletion();
-        }
-    };
-
-    // Update useEffect for timer to set start time
-    useEffect(() => {
-        if (testStage === 'final' && !startTime) {
-            setStartTime(new Date());
-        }
-    }, [testStage]);
-
-    // Update handleTestCompletion to include duration
-    const handleTestCompletion = async () => {
-        // Prevent duplicate submissions
-        if (isSubmitting || hasSubmittedTest) {
-            console.log("Test already submitted or submission in progress, ignoring duplicate call");
-            return;
-        }
-        
-        // Set submitting state immediately
-        setIsSubmitting(true);
-        console.log(`${testStage} test completion initiated`);
-        
         try {
-            // Create a submission ID to track this specific submission
-            const submissionId = Date.now().toString();
-            console.log(`Creating test submission with ID: ${submissionId}`);
-            
-            // Calculate duration for final test
-            const endTime = new Date();
-            const duration = startTime ? Math.floor((endTime.getTime() - startTime.getTime()) / 1000) : 0;
-            
-            // CRITICAL FIX: Include scratchboard content with each question
-            const questionsWithWork = allQuestions.map((q, i) => {
-                const questionId = q.id;
-                // Get the scratchboard content for this specific question
-                const workContent = workingSpace[questionId] || "";
+            // Get the final answers array
+            const finalAnswers = [...answersRef.current];
+            while (finalAnswers.length < selectedQuestions.length) {
+                finalAnswers.push("NO ANSWER");
+            }
+
+            const testQuestions: TestQuestion[] = selectedQuestions.map((q, i) => {
+                const userAnswer = finalAnswers[i] || "NO ANSWER";
                 
-                console.log(`Question ${questionId}: Work content length: ${workContent.length} chars`);
+                // Check if the correct answer is a single letter (A, B, C, D)
+                const isLetterFormat = q.correctAnswer && /^[A-D]$/.test(q.correctAnswer);
+                
+                let isCorrect = false;
+                
+                if (isLetterFormat) {
+                    // If correctAnswer is a letter, directly compare with user's answer
+                    // which should also be a letter for pre/post tests
+                    isCorrect = userAnswer.trim().toLowerCase() === (q.correctAnswer || '').trim().toLowerCase();
+                    console.log(`Letter comparison: User answered "${userAnswer}" vs correct "${q.correctAnswer}" -> ${isCorrect}`);
+                } else {
+                    // For value-based comparison (like final test), normalize and compare values
+                    const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+                    const normalizedCorrectAnswer = (q.correctAnswer || '').trim().toLowerCase();
+                    isCorrect = normalizedUserAnswer === normalizedCorrectAnswer;
+                    console.log(`Value comparison: User answered "${userAnswer}" vs correct "${q.correctAnswer}" -> ${isCorrect}`);
+                }
+                
+                // For storing in the database, always include the actual content value if possible
+                // This ensures consistent data format for both letter-based and value-based answers
+                let userAnswerValue = userAnswer;
+                if (isLetterFormat && q.options && userAnswer && q.options[userAnswer]) {
+                    // If letter format and we have the option value, store the actual text value too
+                    userAnswerValue = q.options[userAnswer] as string;
+                    console.log(`Storing option value "${userAnswerValue}" for letter answer "${userAnswer}"`);
+                }
                 
                 return {
-                    questionId: questionId,
+                    questionId: q.id,
                     question: q.question,
-                    userAnswer: answersRef.current[i] || 'No answer provided',
+                    userAnswer: userAnswerValue,
                     correctAnswer: q.correctAnswer || '',
-                    isCorrect: (answersRef.current[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase(),
-                    // Include the scratchboard work for this question
-                    scratchboardContent: workContent,
-                    // Add duration for final test
-                    duration: testStage === 'final' ? duration : 0
+                    isCorrect,
+                    scratchboardContent: workingSpace[q.id] || '',
+                    // Only track duration for final test, set to 0 for pre/post tests
+                    duration: testStage === 'final' ? timeElapsed : 0
                 };
             });
-            
-            // Save test data with the enhanced question objects
-            saveTestData({
+
+            // Update the score calculation based on the mapped questions
+            const score = testQuestions.filter(q => q.isCorrect).length / testQuestions.length * 100;
+
+            const testData: TestData = {
                 testType: testStage as 'pre' | 'post' | 'final',
-                questions: questionsWithWork,
-                score: calculateScore(allQuestions, answersRef.current),
+                questions: testQuestions,
+                score: Math.round(score),
                 completedAt: new Date(),
-                submissionId,
-                timeoutOccurred: answersRef.current.some(answer => answer === "NO ANSWER - TIME EXPIRED"),
-                duration: testStage === 'final' ? duration : 0
-            });
-            
-            // Mark as submitted
-            setHasSubmittedTest(true);
-            
-            // Navigate to next stage (with simplified approach)
-            console.log(`Completing ${testStage} test and navigating to next stage`);
-            
-            if (testStage === 'final') {
-                await completeFinalTest();
-            } else if (testStage === 'post') {
-                completePostTest();
-            } else {
-                completePreTest();
+                submissionId: uuidv4(),
+                // Only track duration for final test, set to 0 for pre/post tests
+                duration: testStage === 'final' ? timeElapsed : 0
+            };
+
+            // Save the test data via the Flow context
+            console.log("Saving test data via Flow context:", testData);
+            saveTestData(testData);
+
+            // Call the appropriate completion function
+            switch (testStage) {
+                case 'pre':
+                    completePreTest();
+                    break;
+                case 'post':
+                    completePostTest();
+                    break;
+                case 'final':
+                    completeFinalTest();
+                    break;
+                default:
+                    console.error("Unknown test stage:", testStage);
             }
-            
+
+            setTestComplete(true);
         } catch (error) {
-            console.error("Error in handleTestCompletion:", error);
+            console.error("Error handling test completion:", error);
             setIsSubmitting(false);
+            setHasSubmittedTest(false);
         }
     };
 
-    // Helper to calculate score consistently
+    // Helper to calculate score consistently using the same comparison method
     const calculateScore = (questions: RawQuestion[], answers: string[]) => {
-        const correctCount = questions.filter((q: RawQuestion, i: number) => 
-            (answers[i] || '').toLowerCase() === (q.correctAnswer || '').toLowerCase()
-        ).length;
+        const correctCount = questions.filter((q: RawQuestion, i: number) => {
+            const userAnswer = answers[i] || '';
+            
+            // Check if the correct answer is a single letter (A, B, C, D)
+            const isLetterFormat = q.correctAnswer && /^[A-D]$/.test(q.correctAnswer);
+            
+            if (isLetterFormat) {
+                // If correctAnswer is a letter, directly compare with user's answer
+                return userAnswer.trim().toLowerCase() === (q.correctAnswer || '').trim().toLowerCase();
+            } else {
+                // For value-based comparison, normalize and compare values
+                const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+                const normalizedCorrectAnswer = (q.correctAnswer || '').trim().toLowerCase();
+                return normalizedUserAnswer === normalizedCorrectAnswer;
+            }
+        }).length;
+        
         return Math.round((correctCount / questions.length) * 100);
     };
 
-    // Simplify the handleSubmitAnswer function - remove timer-related code for pre/post tests
+    // Improved handleSubmitAnswer function that handles different test types appropriately
     const handleSubmitAnswer = () => {
         // Prevent resubmission if already submitting
-        if (roundEndedRef.current || !currentAnswer || isSubmitting) return;
+        if (isSubmitting) {
+            console.log("Already submitting, ignoring click");
+            return;
+        }
 
+        console.log(`Submitting answer for ${testStage} test, question ${currentQuestionIndex + 1}`);
         setIsSubmitting(true);
-        roundEndedRef.current = true;
 
         // Save the current answer to the userAnswers array
         answersRef.current[currentQuestionIndex] = currentAnswer;
@@ -375,75 +445,135 @@ function TestContent() {
         // Only validate scratchboard content for final test
         const scratchboardContent = workingSpace[currentQuestion?.id || 0] || "";
         if (testStage === 'final' && !scratchboardContent.trim()) {
+            console.log("Final test requires work to be shown - validation failed");
             setErrors(prev => ({ ...prev, work: true }));
             setIsSubmitting(false);
-            roundEndedRef.current = false;
             return;
         }
 
+        // Clear any errors if validation passes
+        if (errors.work) {
+            setErrors(prev => ({ ...prev, work: false }));
+        }
+
         // Handle next question or completion
-        if (currentQuestionIndex < allQuestions.length - 1) {
+        if (currentQuestionIndex < selectedQuestions.length - 1) {
+            console.log(`Advancing to question ${currentQuestionIndex + 2}`);
             setCurrentQuestionIndex(currentQuestionIndex + 1);
             setTimeout(() => setIsSubmitting(false), 500);
-            roundEndedRef.current = false;
         } else {
+            console.log("All questions answered, completing test");
+            // Use handleTestCompletion for consistency across all test types
             handleTestCompletion();
         }
     };
 
-    // Modify the timer effect to only run for final test
+    // Modified timer effect to count up for final test
     useEffect(() => {
         // Only run timer for final test questions
         if (testStage !== 'final' || roundEndedRef.current || hasSubmittedTest) return;
+
+        // Reset can submit state when a new question is loaded
+        if (canSubmitRef.current !== false) {
+            console.log("Resetting canSubmit state for new question");
+        }
+        canSubmitRef.current = false;
+        setCanSubmit(false);
 
         if (timerRef.current) {
             clearInterval(timerRef.current);
             timerRef.current = null;
         }
 
+        // Record the start time to calculate time elapsed more accurately
+        const startTimeMs = Date.now();
+        
         timerRef.current = setInterval(() => {
-            setTimeLeft(prev => {
-                if (prev <= 1) {
-                    if (timerRef.current) {
-                        clearInterval(timerRef.current);
-                        timerRef.current = null;
-                    }
-                    
-                    // Auto-submit final test when time expires
-                    console.log('Final test time expired - auto-submitting');
-                    
-                    // Save the current answer (even if empty)
-                    const finalAnswer = currentAnswer.trim() || "NO ANSWER - TIME EXPIRED";
-                    answersRef.current[currentQuestionIndex] = finalAnswer;
-                    setUserAnswers([...answersRef.current]);
-                    
-                    // Auto-submit timeout answer
-                    setTimeout(autoSubmitTimeoutAnswer, 0);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
+            // Calculate elapsed time based on real time difference to avoid drift
+            const elapsedSeconds = Math.floor((Date.now() - startTimeMs) / 1000);
+            setTimeElapsed(elapsedSeconds);
+            
+            // Enable submit button after 10 seconds - only set it once
+            if (elapsedSeconds >= 10 && !canSubmitRef.current) {
+                console.log("10 seconds passed, enabling submit button permanently");
+                canSubmitRef.current = true;
+                setCanSubmit(true);
+            }
+        }, 500); // Use a smaller interval for smoother updates
+
+        // Use a guaranteed timeout to enable the button after 10 seconds
+        const enableSubmitTimeout = setTimeout(() => {
+            console.log("Force enabling submit button after timeout");
+            canSubmitRef.current = true;
+            setCanSubmit(true);
+        }, 10500);
 
         return () => {
             if (timerRef.current) {
                 clearInterval(timerRef.current);
                 timerRef.current = null;
             }
+            clearTimeout(enableSubmitTimeout);
         };
-    }, [currentQuestionIndex, testStage, allQuestions, hasSubmittedTest]);
+    }, [currentQuestionIndex, testStage, selectedQuestions, hasSubmittedTest]);
+
+    // Add an effect to keep canSubmit true once it's set (for this question)
+    useEffect(() => {
+        if (canSubmitRef.current && !canSubmit) {
+            console.log("Forcing canSubmit to remain true");
+            setCanSubmit(true);
+        }
+    }, [canSubmit]);
 
     // Handle option selection for multiple choice
-    const handleOptionSelect = (option: string) => {
-        console.log(`Option selected for question ${currentQuestionIndex + 1}:`, option);
-        setCurrentAnswer(option);
+    const handleOptionSelect = (optionKey: string) => {
+        console.log(`Option selected for question ${currentQuestionIndex + 1}: ${optionKey}`);
+        
+        // Get the option value
+        const optionValue = currentQuestion?.options?.[optionKey] || optionKey;
+        console.log(`Option value: ${optionValue}`);
+        
+        // For pre-test and post-test, we need to handle both formats:
+        // 1) Store the actual text value for comparison with correctAnswer when it's a full value
+        // 2) Store the option key (A, B, C, D) when correctAnswer is a letter 
+        
+        // Check if the correct answer is a single letter (A, B, C, D)
+        const isLetterFormat = currentQuestion?.correctAnswer && 
+                             /^[A-D]$/.test(currentQuestion.correctAnswer);
+        
+        // For letter format answers (most pre/post test questions), store the key
+        // Otherwise store the actual value (for value-based comparison)
+        const valueToStore = isLetterFormat ? optionKey : optionValue;
+        
+        console.log(`Storing answer as: "${valueToStore}" (${isLetterFormat ? 'letter format' : 'value format'})`);
+        
+        // Store the appropriate value based on the correct answer format
+        setCurrentAnswer(valueToStore);
         
         // Immediately save to answersRef to ensure it's not lost
-        answersRef.current[currentQuestionIndex] = option;
+        answersRef.current[currentQuestionIndex] = valueToStore;
     };
 
     // Get current question
-    const currentQuestion = allQuestions[currentQuestionIndex];
+    const currentQuestion = selectedQuestions[currentQuestionIndex];
+    
+    // Add debug output for index
+    useEffect(() => {
+        console.log(`Current question index: ${currentQuestionIndex}, selected questions length: ${selectedQuestions.length}`);
+        if (currentQuestion) {
+            console.log(`Current question: ${JSON.stringify(currentQuestion)}`);
+        } else {
+            console.warn('Current question is undefined!');
+        }
+    }, [currentQuestionIndex, selectedQuestions]);
+
+    // Add an effect to log answers for debugging
+    useEffect(() => {
+        if (currentAnswer) {
+            console.log(`Current answer set to: "${currentAnswer}"`);
+            console.log(`Current answers in ref:`, answersRef.current);
+        }
+    }, [currentAnswer]);
 
     // Loading state
     if (isLoading) {
@@ -464,8 +594,44 @@ function TestContent() {
         }
     };
 
+    // Function to manually reset stuck state
+    const resetStuckState = () => {
+        console.log("Manual reset of stuck state triggered");
+        
+        // Force enable the submit button
+        canSubmitRef.current = true;
+        setCanSubmit(true);
+        
+        // Reset submission flags
+        setIsSubmitting(false);
+        setHasSubmittedTest(false);
+        
+        // Clear and restart timer if needed
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+        
+        // Set a minimum elapsed time to ensure the button becomes enabled
+        if (timeElapsed < 10) {
+            setTimeElapsed(10);
+        }
+        
+        // Add console debugging
+        console.log("Reset complete - state after reset:", {
+            canSubmit: true,
+            isSubmitting: false,
+            hasSubmittedTest: false,
+            timeElapsed: Math.max(10, timeElapsed)
+        });
+    };
+
     const handleSubmitFinalTest = () => {
         console.log("Final test submit button clicked");
+        
+        // Force enable button in case it's still disabled
+        canSubmitRef.current = true;
+        setCanSubmit(true);
         
         // Add a flag to prevent double-clicks
         if (isSubmitting) {
@@ -473,18 +639,20 @@ function TestContent() {
             return;
         }
         
-        // Set submitting state
+        // Indicate submission is in progress
+        console.log("Starting final test submission process");
         setIsSubmitting(true);
         
-        try {
-            console.log("Saving final test data to flow context");
-            // Your existing code to save test data...
-            
-            console.log("Calling completeFinalTest");
-            completeFinalTest();
-        } catch (error) {
-            console.error("Error in handleSubmitFinalTest:", error);
-        }
+        // Instead of handling submission separately, use the handleTestCompletion function
+        // which properly handles saving test data with the correct duration
+        handleTestCompletion();
+        
+        // Add a fallback safety timeout to ensure UI resets if navigation doesn't happen
+        setTimeout(() => {
+            console.log("Safety timeout: resetting submission state");
+            setIsSubmitting(false);
+            setHasSubmittedTest(false);
+        }, 5000);
     };
 
     return (
@@ -495,20 +663,30 @@ function TestContent() {
                     <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
                         <div className="flex justify-between items-center">
                             <div>
-                                <h1 className="text-3xl text-white font-bold">{getTestTitle()}</h1>
+                                <h1 className="text-3xl text-white font-bold">Exponents</h1>
                                 <p className="text-white mt-2">
-                                    Question {currentQuestionIndex + 1} of {allQuestions.length || 1}
+                                    Question {currentQuestionIndex + 1} of {selectedQuestions.length || 1}
                                 </p>
                             </div>
-                            {testStage === 'final' && (
-                                <div className="bg-green-900 px-4 py-2 rounded-lg">
-                                    <span className="text-white font-mono font-bold text-xl">
-                                        {formatTime(timeLeft)}
-                                    </span>
-                                </div>
-                            )}
                         </div>
                     </div>
+
+                    {/* Debug button in development mode */}
+                    {process.env.NODE_ENV === 'development' && (
+                        <div className="fixed bottom-2 right-2 z-50 flex flex-col items-end space-y-1">
+                            <div className="bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+                                <span>canSubmit: {canSubmit ? 'true' : 'false'} | </span>
+                                <span>isSubmitting: {isSubmitting ? 'true' : 'false'} | </span>
+                                <span>time: {timeElapsed}s</span>
+                            </div>
+                            <button 
+                                onClick={resetStuckState}
+                                className="bg-red-600 text-white text-xs px-2 py-1 rounded opacity-90 hover:opacity-100"
+                            >
+                                Reset UI
+                            </button>
+                        </div>
+                    )}
 
                     {/* Question Content */}
                     <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
@@ -526,7 +704,8 @@ function TestContent() {
                                             key={key}
                                             onClick={() => handleOptionSelect(key)}
                                             className={`p-3 rounded-lg text-left flex items-start ${
-                                                currentAnswer === key 
+                                                // Check if the current option value matches the selected answer
+                                                currentAnswer === value 
                                                 ? 'bg-purple-700 border-2 border-purple-400' 
                                                 : 'bg-white bg-opacity-10 border border-gray-600 hover:bg-opacity-20'
                                             } text-white`}
@@ -561,12 +740,6 @@ function TestContent() {
                         
                         {/* Scratchpad - moved below answer options and renamed */}
                         <div className="mb-6">
-                            <label className="block text-white text-sm mb-2">
-                                Show your work {testStage === 'final' ? '(required)' : '(optional)'}:
-                                {errors.work && testStage === 'final' && (
-                                    <span className="text-red-400 text-xs ml-2">* You must show your work before submitting</span>
-                                )}
-                            </label>
                             <textarea
                                 ref={workingSpaceRef}
                                 value={workingSpace[currentQuestion?.id || 0] || ""}
@@ -575,39 +748,67 @@ function TestContent() {
                                     [currentQuestion?.id || 0]: e.target.value
                                 })}
                                 className="w-full h-48 bg-white bg-opacity-10 text-white border border-gray-600 rounded-lg p-3 resize-none"
-                                placeholder="Use this space to work through your solution (optional)..."
+                                placeholder="Space for scratch work..."
                             />
                         </div>
 
-                        {/* Submit Button */}
-                        <div className="flex justify-end">
-                            <button 
-                                onClick={handleSubmitAnswer}
-                                disabled={
-                                    !currentAnswer.trim() || 
-                                    (testStage === 'final' && !(workingSpace[currentQuestion?.id || 0] || "").trim()) ||
-                                    isSubmitting
-                                }
-                                className={`px-6 py-2 ${
-                                    isSubmitting 
-                                        ? 'bg-gray-500 cursor-not-allowed'
-                                        : !currentAnswer.trim() || (testStage === 'final' && !(workingSpace[currentQuestion?.id || 0] || "").trim())
-                                            ? 'bg-gray-400 cursor-not-allowed'
-                                            : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
-                                } text-white rounded-lg flex items-center justify-center`}
-                            >
-                                {isSubmitting ? (
-                                    <>
-                                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Submitting...
-                                    </>
+                        {/* Update the submit button for final test */}
+                        <div className="flex justify-between mt-6">
+                            {currentQuestionIndex > 0 && (
+                                <button
+                                    onClick={() => {
+                                        if (!isSubmitting) {
+                                            setCurrentQuestionIndex(currentQuestionIndex - 1);
+                                        }
+                                    }}
+                                    disabled={isSubmitting}
+                                    className="bg-white bg-opacity-10 px-6 py-3 rounded-lg text-white hover:bg-opacity-20 disabled:opacity-50"
+                                >
+                                    Previous
+                                </button>
+                            )}
+                            
+                            <div className="ml-auto flex space-x-4">
+                                {currentQuestionIndex < selectedQuestions.length - 1 ? (
+                                    <button
+                                        onClick={handleSubmitAnswer}
+                                        disabled={
+                                          isSubmitting || 
+                                          !currentAnswer.trim() || 
+                                          (testStage === 'final' && !canSubmit)
+                                        }
+                                        className={`bg-green-600 px-6 py-3 rounded-lg text-white font-bold hover:bg-green-700 
+                                            ${(isSubmitting || 
+                                              !currentAnswer.trim() || 
+                                              (testStage === 'final' && !canSubmit)) 
+                                              ? 'opacity-50 cursor-not-allowed' 
+                                              : ''}`}
+                                    >
+                                        {testStage === 'final' && !canSubmit 
+                                            ? `Wait ${Math.max(1, 10 - timeElapsed)}s...` 
+                                            : 'Next Question'}
+                                    </button>
                                 ) : (
-                                    currentQuestionIndex === allQuestions.length - 1 ? "Complete Test" : "Submit Answer"
+                                    <button
+                                        onClick={testStage === 'final' ? handleSubmitFinalTest : handleSubmitAnswer}
+                                        disabled={
+                                          isSubmitting || 
+                                          !currentAnswer.trim() || 
+                                          (testStage === 'final' && !canSubmit)
+                                        }
+                                        className={`bg-purple-600 px-6 py-3 rounded-lg text-white font-bold hover:bg-purple-700 
+                                            ${(isSubmitting || 
+                                              !currentAnswer.trim() || 
+                                              (testStage === 'final' && !canSubmit)) 
+                                              ? 'opacity-50 cursor-not-allowed' 
+                                              : ''}`}
+                                    >
+                                        {testStage === 'final' && !canSubmit 
+                                            ? `Wait ${Math.max(1, 10 - timeElapsed)}s...` 
+                                            : 'Complete Test'}
+                                    </button>
                                 )}
-                            </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -635,19 +836,43 @@ export default function TestPage() {
         // Calculate score and format questions
         let score = 0;
         const formattedQuestions = questions.map((question, index) => {
+            // Ensure we're using the actual content of the answer, not just option keys
             const userAnswer = answers[index] || '';
             const correctAnswer = question.correctAnswer || '';
-            const isCorrect = userAnswer.toLowerCase() === correctAnswer.toLowerCase();
+            
+            // Check if the correct answer is a single letter (A, B, C, D)
+            const isLetterFormat = correctAnswer && /^[A-D]$/.test(correctAnswer);
+            
+            let isCorrect = false;
+            let userAnswerValue = userAnswer;
+            
+            if (isLetterFormat) {
+                // For letter-format answers, compare the letters directly
+                isCorrect = userAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
+                
+                // Try to get the actual option value if available
+                if (question.options && userAnswer && question.options[userAnswer]) {
+                    userAnswerValue = question.options[userAnswer].toString();
+                }
+            } else {
+                // For value-based comparison, normalize and compare
+                const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+                const normalizedCorrectAnswer = correctAnswer.trim().toLowerCase();
+                isCorrect = normalizedUserAnswer === normalizedCorrectAnswer;
+            }
             
             if (isCorrect) score++;
+            
+            console.log(`Question ${question.questionId} - User answer: "${userAnswerValue}" (original: "${userAnswer}"), Correct answer: "${correctAnswer}", isCorrect: ${isCorrect}`);
             
             return {
                 questionId: question.questionId,
                 question: question.question,
-                userAnswer,
+                userAnswer: userAnswerValue,  // Store the actual value, not just the letter
                 correctAnswer,
                 isCorrect,
-                duration: 0
+                // Duration should be 0 for pre/post tests, or the actual elapsed time for final tests
+                duration: testType === 'final' ? question.duration : 0
             };
         });
         
@@ -660,8 +885,9 @@ export default function TestPage() {
             questions: formattedQuestions,
             score: percentScore,
             completedAt: new Date(),
-            duration: 0,
-            submissionId: Date.now().toString()
+            // Duration should be 0 for pre/post tests, or the actual elapsed time for final tests
+            duration: testType === 'final' ? (formattedQuestions[0]?.duration || 0) : 0,
+            submissionId: uuidv4() // Use uuid for consistent ID generation
         });
     };
     

@@ -15,7 +15,7 @@ import { prepareMessagesForStorage } from '@/utils/messageUtils';
 interface Question {
     id: number;
     question: string;
-    options?: Record<string, string>; // A, B, C, D options
+    options?: string[] | Record<string, string>; // Support both array and object formats
     answer: string;
     correctAnswer?: string;
 }
@@ -66,7 +66,7 @@ const formatTime = (seconds: number): string => {
 
 export default function SinglePage() {
     const router = useRouter();
-    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext, lessonType } = useFlow();
     
     // Debug line to see what's happening
     console.log("SINGLE PAGE - Current stage:", currentStage, "Question index:", lessonQuestionIndex);
@@ -81,8 +81,10 @@ export default function SinglePage() {
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
     const [nextMessageId, setNextMessageId] = useState(3);
     const [typingMessageIds, setTypingMessageIds] = useState<number[]>([]);
-    const [isQuestioningEnabled, setIsQuestioningEnabled] = useState(true);
-    const [timeLeft, setTimeLeft] = useState(120); // 2 minutes
+    const [isQuestioningEnabled, setIsQuestioningEnabled] = useState(false);
+    const [botThinking, setBotThinking] = useState(false);
+    const [timeElapsed, setTimeElapsed] = useState(0); // Time counting up before submission
+    const [timeLeft, setTimeLeft] = useState(90);    // Time counting down after discussion starts
     const [evaluationComplete, setEvaluationComplete] = useState(false);
     const [userHasScrolled, setUserHasScrolled] = useState(false);
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
@@ -92,11 +94,13 @@ export default function SinglePage() {
     const [lastMessageTime, setLastMessageTime] = useState(Date.now());
     const [wordCount, setWordCount] = useState(0);
     const [skipTypewriter, setSkipTypewriter] = useState(false);
+    const [canSubmit, setCanSubmit] = useState(false); // Add state for tracking if submit button can be enabled
     const interventionRef = useRef(false);
     const wordThreshold = 750; // Match the 750 word threshold from group page
     const timeThreshold = 30000; // 30 seconds
     const lastWordCountResetRef = useRef<number | null>(null);
     const roundEndedRef = useRef(false);
+    const canSubmitRef = useRef(false); // Add ref for stable submit button state tracking
     
     // --- REFS ---
     const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -184,13 +188,50 @@ export default function SinglePage() {
         const normalizedUserAnswer = userAnswer.trim().toLowerCase();
         const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
         
+        // Check if this is a multiple choice question
+        if (question.options) {
+            // Handle both array and object formats for options
+            if (Array.isArray(question.options)) {
+                // Find which option letter corresponds to the user's answer
+                const optionIndex = question.options.findIndex(
+                    (option: string) => option.trim().toLowerCase() === normalizedUserAnswer
+                );
+
+                if (optionIndex !== -1) {
+                    // Convert index to letter (0 -> A, 1 -> B, etc.)
+                    const userAnswerLetter = String.fromCharCode(65 + optionIndex);
+                    
+                    // If correctAnswer is already a letter, compare directly
+                    if (/^[A-Da-d]$/.test(normalizedCorrectAnswer)) {
+                        return userAnswerLetter.toLowerCase() === normalizedCorrectAnswer;
+                    } 
+                    // If correctAnswer is the full option text, compare user's selected text
+                    else {
+                        return normalizedUserAnswer === normalizedCorrectAnswer;
+                    }
+                }
+            } 
+            // Handle object format like {A: "text", B: "text"}
+            else if (typeof question.options === 'object') {
+                // Try to find which letter key corresponds to the user's answer
+                for (const [key, value] of Object.entries(question.options)) {
+                    if (String(value).trim().toLowerCase() === normalizedUserAnswer) {
+                        // If user's answer matches this option text
+                        // Compare the key with correctAnswer
+                        return key.toLowerCase() === normalizedCorrectAnswer;
+                    }
+                }
+            }
+        }
+        
+        // For non-multiple choice questions or fallback, compare the text directly
         return normalizedUserAnswer === normalizedCorrectAnswer;
     };
 
     // Update saveSessionData to include correctness
     const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
-            // Calculate session duration in seconds - use submission time if available
+            // Calculate session duration using submission time if available
             const endTime = submissionTime || new Date();
             const durationMs = endTime.getTime() - sessionStartTime.getTime();
             const durationSeconds = Math.floor(durationMs / 1000);
@@ -198,57 +239,122 @@ export default function SinglePage() {
             // Get the question text
             const questionText = getQuestionText(currentQuestion);
             
-            // Check if the answer is correct
+            // Check correctness
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            // Log raw messages before cleaning
-            console.log(`💾 SINGLE [Session Save] Original messages count: ${messages.length}`);
-            if (messages.length > 0) {
-                console.log(`💾 SINGLE [Message Sample] First message fields: ${Object.keys(messages[0]).join(', ')}`);
-                console.log(`💾 SINGLE [Message Sample] First message text: ${typeof messages[0].text === 'string' ? 
-                    messages[0].text.substring(0, 50) + '...' : 'non-string content'}`);
-            }
+            // Use placeholder for empty scratchboard
+            const workContent = scratchboardContent.trim() || "[No work shown]";
             
-            // Clean messages for database storage
-            const cleanedMessages = prepareMessagesForStorage(messages);
+            // Log session details including lesson type
+            console.log(`💾 SINGLE [Session Save] Saving for question ${lessonQuestionIndex}, scenario: ${lessonType}`);
             
-            console.log(`💾 SINGLE [Session Save] Saving ${messages.length} messages (${cleanedMessages.length} after cleaning)`);
-            
-            // Add additional message verification
-            const messagesWithoutProperties = cleanedMessages.filter(msg => 
-                !msg.id || !msg.sender || !msg.text || !msg.timestamp
-            );
-            
-            if (messagesWithoutProperties.length > 0) {
-                console.warn(`⚠️ SINGLE Found ${messagesWithoutProperties.length} messages with missing properties`);
-            }
-            
-            if (messages.length > 0) {
-                console.log(`💾 SINGLE [Session Sample] First message: ${JSON.stringify(messages[0]).substring(0, 100)}...`);
-                console.log(`💾 SINGLE [Session Sample] Last message: ${JSON.stringify(messages[messages.length-1]).substring(0, 100)}...`);
-            }
-            
-            // Save to flow context 
-            saveToFlowContext({
-                questionId: lessonQuestionIndex,
+            // Create the session data object 
+            const sessionDataObj = {
+                questionId: lessonQuestionIndex, // Use predetermined lessonQuestionIndex
                 questionText,
                 startTime: sessionStartTime,
                 endTime,
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
-                scratchboardContent,
-                messages: cleanedMessages,
+                scratchboardContent: workContent,
+                messages: prepareMessagesForStorage(messages),
                 isCorrect,
-                timeoutOccurred: isTimeout
-            });
+                timeoutOccurred: isTimeout,
+                lessonType: lessonType // Include the lessonType (scenario type)
+            };
             
-            console.log(`✅ SINGLE [Session Save] Data saved to flow context successfully with ${cleanedMessages.length} messages`);
+            // Save to flow context
+            saveToFlowContext(sessionDataObj);
+            
+            console.log(`✅ SINGLE [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
         } catch (error) {
-            console.error('❌ SINGLE [Session Save] Error saving session data:', error);
+            console.error(`❌ SINGLE [Session Save] Error saving session data:`, error);
         }
     };
 
-    // Function to handle timer expiration
+    // Timer functionality
+    useEffect(() => {
+        if (!currentQuestion) return;
+
+        if (hasSubmittedAnswer) {
+            // Post-submission timer logic (countdown)
+            if (timeLeft <= 0) {
+                // Time to move to next page
+                console.log('Discussion time expired - navigating to next page');
+                
+                // Show message about moving on
+                const timeUpMessageId = getUniqueMessageId();
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        id: timeUpMessageId,
+                        sender: 'system',
+                        text: "Time's up! Moving to the next question...",
+                        timestamp: new Date().toISOString()
+                    }
+                ]);
+                
+                // Save session data before navigating
+                setTimeout(() => {
+                    console.log(`💬 SINGLE Saving final session with ${messages.length + 1} messages`);
+                    saveSessionData(finalAnswer.trim() || selectedOption || "No answer specified", false);
+                    
+                    // Navigate after data is saved
+                    setTimeout(() => {
+                        completeLesson();
+                    }, 1000);
+                }, 1000);
+                
+                return;
+            }
+
+            // Continue with normal countdown timer logic
+            if (roundEndedRef.current) return;
+
+            const timerId = setTimeout(() => {
+                setTimeLeft((prevTime) => prevTime - 1);
+            }, 1000);
+
+            return () => clearTimeout(timerId);
+        } else {
+            // Pre-submission timer logic (count up)
+            if (roundEndedRef.current) return;
+
+            // Set up timer to count up
+            const timerId = setTimeout(() => {
+                setTimeElapsed((prevTime) => prevTime + 1);
+            }, 1000);
+            
+            // Enable submit after 10 seconds if not already enabled
+            if (timeElapsed >= 10 && !canSubmitRef.current) {
+                canSubmitRef.current = true;
+                setCanSubmit(true);
+            }
+            
+            return () => clearTimeout(timerId);
+        }
+    }, [timeLeft, timeElapsed, hasSubmittedAnswer, currentQuestion]);
+    
+    // Add a one-time effect to handle the 10-second submit button delay
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        console.log("Setting up 10-second timer for submit button");
+        
+        // Set a timeout to enable the submit button after 10 seconds
+        const enableSubmitTimeout = setTimeout(() => {
+            // Check if we still need to enable the button
+            if (!canSubmitRef.current && !hasSubmittedAnswer) {
+                console.log("Force enabling submit button after 10s timeout");
+                canSubmitRef.current = true;
+                setCanSubmit(true);
+            }
+        }, 10000);
+        
+        // Clean up the timeout on unmount
+        return () => clearTimeout(enableSubmitTimeout);
+    }, []); // Empty dependency array - only run once on mount
+
+    // Function to handle timer expiration - only for manually triggered timeouts
     const handleTimeExpired = () => {
         console.log('Time expired - auto-submitting current answer');
 
@@ -306,83 +412,33 @@ export default function SinglePage() {
         const fetchQuestion = async () => {
             try {
                 const response = await fetch('/questions.json');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch questions');
+                }
+
                 const data = await response.json();
+
+                // Get questions array
+                const allQuestionsData = data.questions || [];
                 
-                if (data && data.questions && 
-                    typeof lessonQuestionIndex === 'number' && 
+                // Use the predetermined lessonQuestionIndex from the Flow context
+                if (typeof lessonQuestionIndex === 'number' && 
                     lessonQuestionIndex >= 0 && 
-                    lessonQuestionIndex < data.questions.length) {
-                    
-                    setCurrentQuestion(data.questions[lessonQuestionIndex]);
+                    lessonQuestionIndex < allQuestionsData.length) {
+                    console.log(`Using predetermined lessonQuestionIndex: ${lessonQuestionIndex}`);
+                    setCurrentQuestion(allQuestionsData[lessonQuestionIndex]);
                 } else {
-                    // Fallback to first question or show error
-                    console.error('Invalid lesson question index or no questions found:', 
-                        { lessonQuestionIndex, dataLength: data?.questions?.length });
-                    
-                    if (data && data.questions && data.questions.length > 0) {
-                        setCurrentQuestion(data.questions[0]);
-                    }
+                    console.warn(`Invalid lessonQuestionIndex: ${lessonQuestionIndex}, using default question`);
+                    setCurrentQuestion(allQuestionsData[0]); 
                 }
             } catch (error) {
-                console.error('Error loading questions:', error);
+                console.error("Error loading question:", error);
+                setCurrentQuestion(null);
             }
         };
-        
+
         fetchQuestion();
     }, [lessonQuestionIndex]);
-    
-    // Timer functionality
-    useEffect(() => {
-        if (!currentQuestion) return;
-
-        if (!hasSubmittedAnswer) {
-            // Pre-submission timer logic
-            if (timeLeft <= 0) {
-                handleTimeExpired();
-                return;
-            }
-        } else {
-            // Post-submission discussion timer
-            if (timeLeft <= 0) {
-                // Time to move to next page
-                console.log('Discussion time expired - navigating to next page');
-                
-                // Show message about moving on
-                const timeUpMessageId = getUniqueMessageId();
-                setMessages(prev => [
-                    ...prev,
-                    {
-                        id: timeUpMessageId,
-                        sender: 'system',
-                        text: "Time's up! Moving to the next question...",
-                        timestamp: new Date().toISOString()
-                    }
-                ]);
-                
-                // Save session data before navigating
-                setTimeout(() => {
-                    console.log(`💬 SINGLE Saving final session with ${messages.length + 1} messages`);
-                    saveSessionData(finalAnswer.trim() || selectedOption || "No answer specified", false);
-                    
-                    // Navigate after data is saved
-                    setTimeout(() => {
-                        completeLesson();
-                    }, 1000);
-                }, 1000);
-                
-                return;
-            }
-        }
-
-        // Continue with normal timer logic
-        if (roundEndedRef.current) return;
-
-        const timerId = setTimeout(() => {
-            setTimeLeft((prevTime) => prevTime - 1);
-        }, 1000);
-
-        return () => clearTimeout(timerId);
-    }, [timeLeft, hasSubmittedAnswer, currentQuestion]);
     
     // Add useEffect to track message changes for interventions
     useEffect(() => {
@@ -441,9 +497,11 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
    - Use $\\sqrt{x}$ instead of √x
    - Use $\\times$ instead of × or x
    - Use $5 \\cdot 3$ for multiplication instead of 5*3
-4. Never use double $$ delimiters
-5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-6. Format operators properly: $+$, $-$, $\\div$`;
+4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
+5. Never use double $$ delimiters
+6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+7. Format operators properly: $+$, $-$, $\\div$
+8. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]`;
 
     // Add function to count words in messages
     const countWordsInMessages = (messages: Message[]): number => {
@@ -465,11 +523,18 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
     const startConversation = (question: Question, studentAnswer: string, scratchpad: string) => {
         console.log('Starting conversation with Bob...');
         
+        // Reset discussion timer to 2 minutes
+        setTimeLeft(90);
+        roundEndedRef.current = false;
+        
+        // Use placeholder for empty scratchboard
+        const workContent = scratchpad.trim() || "[No work shown]";
+        
         // Create the user answer message
         const userAnswerMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
-            text: `My answer: ${studentAnswer}\n\nMy work:\n${scratchpad}`,
+            text: `My answer: ${studentAnswer}\n\nMy work:\n${workContent}`,
             timestamp: new Date().toISOString()
         };
 
@@ -492,7 +557,7 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
         const bobMessageId = bobMessage.id;
         
         // Generate response
-        generateTeacherInitialResponse(bobMessageId, question, studentAnswer, scratchpad);
+        generateTeacherInitialResponse(bobMessageId, question, studentAnswer, workContent);
     };
 
     // Function to generate teacher's initial response with the new format
@@ -504,58 +569,79 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
     ) => {
         try {
             const questionText = getQuestionText(question);
-            const correctAnswer = question.correctAnswer || question.answer || 'not provided';
+            const correctAnswer = question.correctAnswer || question.answer || "not provided";
             
+            // Get options if available
+            const options = question.options || [];
+            const isMultipleChoice = (Array.isArray(options) && options.length > 0) ||
+                                    (!Array.isArray(options) && Object.keys(options).length > 0);
+
             // Build prompt for teacher's response
             let promptText = `The current problem is: ${questionText}\n\n`;
+            
+            if (isMultipleChoice) {
+                promptText += `This is a multiple choice problem with the following options:\n`;
+                
+                if (Array.isArray(options)) {
+                    options.forEach((option: string, index: number) => {
+                        promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
+                    });
+                } else {
+                    Object.entries(options).forEach(([key, value]) => {
+                        promptText += `${key}. ${value}\n`;
+                    });
+                }
+                promptText += `\n`;
+            }
+            
             promptText += `The correct answer is: ${correctAnswer}\n\n`;
-            promptText += `The student's answer was: ${studentAnswer}\n\n`;
+            promptText += `The student selected this answer: ${studentAnswer}\n\n`;
             promptText += `The student's work: ${scratchpad}\n\n`;
-            
-            promptText += `As the teacher (Bob), provide your response in this format:
-1. Start with "The correct answer is [correct answer]."
-2. Explain the proper solution approach in a clear, step-by-step manner
-3. Provide specific feedback on the student's approach and where they went right or wrong
-4. End with a question like "Any questions or confusions about this problem?" to encourage further discussion
-5. Use LaTeX notation enclosed in $ symbols for all mathematical expressions`;
-            
+
+            promptText += `As Bob (the math teacher), provide feedback on the student's ${isMultipleChoice ? 'multiple choice selection' : 'answer'}:
+1. Begin by stating whether their selected answer is correct or not
+2. Acknowledge what they did well in their approach
+3. Point out any misconceptions or errors in their reasoning
+4. Provide a clear explanation of the correct solution approach
+5. End with a question to check understanding or advance their thinking
+
+Keep your tone encouraging and conversational.`;
+
             // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
                     systemPrompt: bobPrompt,
-                    model: 'gpt-4o-2024-08-06'
+                    model: currentModel
                 }
             );
-            
-            // Update message with response
-            setMessages(prev =>
-                prev.map(msg =>
-                    msg.id === messageId
-                        ? { ...msg, text: response, timestamp: new Date().toISOString() }
-                        : msg
-                )
-            );
-            
-            // ADD THIS LINE: Add to typingMessageIds for animation
-            setTypingMessageIds(prev => [...prev, messageId]);
-            
+
+            // Replace typing indicator with actual response
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: response,
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+
         } catch (error) {
             console.error("Error generating teacher's initial response:", error);
             
             // Fallback response
-            const fallbackText = `The correct answer is ${question.correctAnswer || question.answer || '[correct answer]'}. Let me explain how to solve this step by step... [Error generating complete response]. Any questions or confusions about this problem?`;
+            const fallbackText = `Let's look at your answer. I see you selected "${studentAnswer}". Your work shows [analyzing reasoning]. We need to think about this problem in terms of [key concept]. Would you like me to explain why?`;
             
-            setMessages(prev =>
-                prev.map(msg =>
-                    msg.id === messageId
-                        ? { ...msg, text: fallbackText, timestamp: new Date().toISOString() }
-                        : msg
-                )
-            );
-            
-            // ALSO ADD HERE: Add to typingMessageIds in error case
-            setTypingMessageIds(prev => [...prev, messageId]);
+            setMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: fallbackText,
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
         }
     };
 
@@ -1006,7 +1092,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
     
     // Modify handleSend to work with student-first approach
     const handleSend = () => {
-        if (!scratchboardContent.trim() || typingMessageIds.length > 0) return;
+        if (typingMessageIds.length > 0) return;
 
         // Record user activity time and submission time
         const now = new Date();
@@ -1019,7 +1105,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
             const userFinalAnswer: Message = {
                 id: getUniqueMessageId(),
                 sender: 'user',
-                text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${scratchboardContent}`,
+                text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${scratchboardContent || "No work shown"}`,
                 timestamp: now.toISOString()
             };
             
@@ -1034,7 +1120,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
             startConversation(
                 currentQuestion!, 
                 submissionText, 
-                scratchboardContent
+                scratchboardContent || "No work shown"
             );
         });
     };
@@ -1133,74 +1219,122 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
                     <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
                         <div className="flex justify-between items-start mb-2">
                             <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                            <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                            {hasSubmittedAnswer && <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
                                 Time: {formatTime(timeLeft)}
-                            </div>
+                            </div>}
                         </div>
                         <p className="text-white text-lg">{formatMathExpression(currentQuestion.question)}</p>
                     </div>
                 )}
 
                 {/* Final Answer - Now ALWAYS visible like in MultiPage */}
-                <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
-                    <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
-                    <div className="flex flex-col space-y-3">
-                        {currentQuestion && currentQuestion.options ? (
-                            // Multiple choice final submission
-                            <div className="grid grid-cols-1 gap-3 mb-4">
-                                {Object.entries(currentQuestion.options).map(([key, value]) => (
-                                    <button
-                                        key={key}
-                                        onClick={() => handleOptionSelect(key)}
-                                        className={`p-3 rounded-md text-left flex items-center ${
-                                            selectedOption === key 
-                                            ? 'bg-purple-700 border-2 border-purple-400' 
-                                            : 'bg-white bg-opacity-10 border border-gray-600 hover:bg-opacity-20'
-                                        } text-white`}
-                                    >
-                                        <span className="font-bold mr-2">{key}:</span> 
-                                        <span>{formatMathExpression(value)}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            // Free text input
-                            <input
-                                type="text"
-                                value={finalAnswer}
-                                onChange={(e) => setFinalAnswer(e.target.value)}
-                                placeholder="Enter your final answer here..."
-                                className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
-                            />
-                        )}
-                        
-                        {/* Submit button - Only show if not submitted yet */}
-                        {!hasSubmittedAnswer && (
-                            <button
-                                onClick={handleSend}
-                                disabled={!scratchboardContent.trim() || typingMessageIds.length > 0}
-                                className={`px-4 py-3 rounded-md text-lg font-medium ${
-                                    scratchboardContent.trim() && typingMessageIds.length === 0
-                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                }`}
-                            >
-                                Submit Final Answer
-                            </button>
-                        )}
-                    </div>
+                <div className="bg-white bg-opacity-15 p-4 rounded-md mb-4 border border-blue-500 flex-shrink-0">
+                    <h3 className="text-lg text-white font-semibold mb-2">Your Final Answer</h3>
+                    
+                    {/* Multiple Choice Options - show when question has options */}
+                    {currentQuestion && currentQuestion.options && (
+                        <div className="grid grid-cols-1 gap-2 mb-3">
+                            {!hasSubmittedAnswer ? (
+                                Array.isArray(currentQuestion.options) ? (
+                                    // Handle array-style options
+                                    currentQuestion.options.map((option: string, index: number) => (
+                                        <div 
+                                            key={index}
+                                            onClick={() => handleOptionSelect(option)}
+                                            className={`cursor-pointer p-3 rounded-md border-2 ${
+                                                finalAnswer === option 
+                                                    ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
+                                                    : 'bg-white bg-opacity-10 border-gray-600'
+                                            }`}
+                                        >
+                                            <div className="flex items-center">
+                                                <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
+                                                    finalAnswer === option 
+                                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                                        : 'border-gray-400'
+                                                }`}>
+                                                    {finalAnswer === option && <span>✓</span>}
+                                                </div>
+                                                <div className="text-white">{formatMathExpression(option)}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    // Handle object-style options
+                                    Object.entries(currentQuestion.options).map(([key, value]) => (
+                                        <div 
+                                            key={key}
+                                            onClick={() => handleOptionSelect(value as string)}
+                                            className={`cursor-pointer p-3 rounded-md border-2 ${
+                                                finalAnswer === value 
+                                                    ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
+                                                    : 'bg-white bg-opacity-10 border-gray-600'
+                                            }`}
+                                        >
+                                            <div className="flex items-center">
+                                                <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
+                                                    finalAnswer === value 
+                                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                                        : 'border-gray-400'
+                                                }`}>
+                                                    {finalAnswer === value && <span>✓</span>}
+                                                </div>
+                                                <div className="text-white">{formatMathExpression(value as string)}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )
+                            ) : (
+                                // After submission, show only the selected answer in a read-only format
+                                <div className="p-3 rounded-md border-2 bg-blue-500 bg-opacity-30 border-blue-500">
+                                    <div className="flex items-center">
+                                        <div className="w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center border-blue-500 bg-blue-500 text-white">
+                                            <span>✓</span>
+                                        </div>
+                                        <div className="text-white">{formatMathExpression(finalAnswer)}</div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    
+                    {/* Text Input - show only when no options are available */}
+                    {(!currentQuestion || !currentQuestion.options) && (
+                        <input
+                            type="text"
+                            value={finalAnswer}
+                            onChange={(e) => setFinalAnswer(e.target.value)}
+                            placeholder="Enter your final answer here..."
+                            className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-2"
+                            disabled={hasSubmittedAnswer}
+                        />
+                    )}
+                    
+                    {!hasSubmittedAnswer && (
+                        <button
+                            onClick={handleSend}
+                            disabled={!finalAnswer.trim() || typingMessageIds.length > 0 || !canSubmit}
+                            className={`w-full mt-2 px-4 py-2 rounded-md font-medium ${
+                                finalAnswer.trim() && typingMessageIds.length === 0 && canSubmit
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                            }`}
+                        >
+                            {canSubmit 
+                                ? 'Submit Final Answer' 
+                                : `Wait ${Math.max(1, 10 - timeElapsed)}s...`
+                            }
+                        </button>
+                    )}
                 </div>
 
                 {/* Scratchboard - Below final answer with matching styling */}
                 <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
-                    <div className="flex justify-between mb-2">
-                        <h3 className="text-white font-semibold">Rough Work (Required)</h3>
-                    </div>
                     <textarea
                         value={scratchboardContent}
                         onChange={(e) => setScratchboardContent(e.target.value)}
                         className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
-                        placeholder="Show your work here... (required for submission)"
+                        placeholder="Space for scratch work..."
                         readOnly={hasSubmittedAnswer} // Make read-only after submission
                     />
                 </div>

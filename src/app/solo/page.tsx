@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useFlow } from '@/context/FlowContext';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
@@ -23,16 +23,35 @@ const formatMathExpression = (text: string) => {
     return text;
 };
 
-// Define the question type without multiple choice options
+// Helper function to format time as MM:SS
+const formatTime = (seconds: number): string => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
+};
+
+// Define the question type to include multiple choice options
 interface Question {
     id: number;
     question: string;
     answer: string;
+    options?: string[]; // Add options for multiple choice
+    correctAnswer?: string; // Add correctAnswer property for consistency
 }
 
 export default function SoloPage() {
-    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData, lessonType } = useFlow();
     const [sessionStartTime] = useState<Date>(new Date());
+    
+    // Timer state
+    const [timeElapsed, setTimeElapsed] = useState(0);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const roundEndedRef = useRef(false);
+    const startTimeRef = useRef<number | null>(null); // Add ref for stable time tracking
+    
+    // Add state for tracking if submit button can be enabled (after 10 seconds)
+    const [canSubmit, setCanSubmit] = useState(false);
+    const canSubmitRef = useRef(false);
     
     // Ensure user is in the proper flow stage
     useEffect(() => {
@@ -57,22 +76,95 @@ export default function SoloPage() {
         answer: false
     });
     
+    // Timer functionality - count up until answer is submitted
+    useEffect(() => {
+        // Only start timer when question is loaded and feedback is not visible
+        if (!currentQuestion || feedback.visible || roundEndedRef.current) return;
+
+        console.log("Starting timer for question", currentQuestion.id);
+        
+        // Reset state at the start of a new timer
+        setCanSubmit(false);
+        canSubmitRef.current = false;
+        
+        // Reset time elapsed to 0
+        setTimeElapsed(0);
+
+        // Clear any existing timer
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+
+        // Record the start time to calculate elapsed time more accurately
+        startTimeRef.current = Date.now();
+        
+        // Set up new timer that increments every second
+        timerRef.current = setInterval(() => {
+            if (!startTimeRef.current) return;
+            
+            // Calculate elapsed time based on real time difference to avoid drift
+            const elapsedSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
+            setTimeElapsed(elapsedSeconds);
+            
+            // Enable submit button after 10 seconds - only set it once
+            if (elapsedSeconds >= 10 && !canSubmitRef.current) {
+                console.log("10 seconds passed, enabling submit button", elapsedSeconds);
+                canSubmitRef.current = true;
+                setCanSubmit(true);
+            }
+        }, 1000); // Use a consistent 1000ms interval 
+
+        // Use a single guaranteed timeout to enable the button after 10 seconds
+        const enableSubmitTimeout = setTimeout(() => {
+            console.log("Force enabling submit button after 10.5s timeout");
+            canSubmitRef.current = true;
+            setCanSubmit(true);
+        }, 10500);
+
+        // Clean up timer on unmount or when dependencies change
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            clearTimeout(enableSubmitTimeout);
+            startTimeRef.current = null; // Reset start time ref
+        };
+    }, [currentQuestion, feedback.visible]); // Remove timeElapsed from dependencies
+    
     // Load the specific question based on lessonQuestionIndex
     useEffect(() => {
         const fetchQuestion = async () => {
             try {
                 const response = await fetch('/questions.json');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.questions && data.questions.length > 0) {
-                        // Use the lessonQuestionIndex to select which question to show
-                        const question = data.questions[lessonQuestionIndex];
-                        setCurrentQuestion(question);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch questions');
+                }
+
+                const data = await response.json();
+                
+                // Get questions array
+                const allQuestionsData = data.questions || [];
+                
+                // Use the predetermined lessonQuestionIndex from the flow context
+                if (typeof lessonQuestionIndex === 'number' && 
+                    lessonQuestionIndex >= 0 && 
+                    lessonQuestionIndex < allQuestionsData.length) {
+                    console.log(`Using predetermined lessonQuestionIndex: ${lessonQuestionIndex}`);
+                    setCurrentQuestion(allQuestionsData[lessonQuestionIndex]);
+                    setIsLoading(false);
+                } else {
+                    console.warn(`Invalid lessonQuestionIndex: ${lessonQuestionIndex}, using default question`);
+                    if (allQuestionsData.length > 0) {
+                        setCurrentQuestion(allQuestionsData[0]);
                         setIsLoading(false);
+                    } else {
+                        throw new Error('No questions available');
                     }
                 }
             } catch (error) {
-                console.error("Error fetching question:", error);
+                console.error("Error loading question:", error);
                 setIsLoading(false);
             }
         };
@@ -82,11 +174,15 @@ export default function SoloPage() {
     
     // Add a function to check answer correctness
     const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
-        if (!question || !question.answer) return false;
+        if (!question) return false;
         
-        // Simple string comparison (enhance as needed)
+        // Check for correctAnswer first, then fall back to answer
+        const correctAnswer = question.correctAnswer || question.answer;
+        if (!correctAnswer) return false;
+        
+        // Simple string comparison for multiple choice options
         const normalizedUserAnswer = userAnswer.trim().toLowerCase();
-        const normalizedCorrectAnswer = question.answer.trim().toLowerCase();
+        const normalizedCorrectAnswer = correctAnswer.trim().toLowerCase();
         
         return normalizedUserAnswer === normalizedCorrectAnswer;
     };
@@ -105,32 +201,36 @@ export default function SoloPage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            // Add more detailed logging to debug the issue
-            console.log(`💾 SOLO [Session Save] Saving session with scratchboardContent length: ${scratchboardContent.length}`);
-            console.log(`💾 SOLO [Session Save] questionId: ${currentQuestion?.id || 0}`);
+            // Use placeholder for empty scratchboard
+            const workContent = scratchboardContent.trim() || "[No work shown]";
+            
+            // Log details for debugging
+            console.log(`💾 SOLO [Session Save] Saving session for question ${lessonQuestionIndex}`);
             console.log(`💾 SOLO [Session Save] finalAnswer: ${finalAnswerText}`);
             console.log(`💾 SOLO [Session Save] isCorrect: ${isCorrect}`);
+            console.log(`💾 SOLO [Session Save] lessonType: ${lessonType}`);
             
             // Create the session data object
             const sessionDataObj = {
-                questionId: currentQuestion?.id || 0,
+                questionId: lessonQuestionIndex, // Use the predetermined lessonQuestionIndex
                 questionText,
                 startTime: sessionStartTime,
                 endTime,
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
-                scratchboardContent, // This is directly from the state variable
+                scratchboardContent: workContent, // Use placeholder if empty
                 messages: [], // Solo mode has no messages
                 isCorrect,
-                timeoutOccurred: isTimeout
+                timeoutOccurred: isTimeout,
+                lessonType: lessonType // Include the lessonType (scenario type)
             };
             
             // Save to flow context using the saveSessionData function
             saveSessionData(sessionDataObj);
             
-            console.log('✅ SOLO [Session Save] Data saved to flow context successfully');
+            console.log(`✅ SOLO [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
         } catch (error) {
-            console.error('❌ SOLO [Session Save] Error saving session data:', error);
+            console.error(`❌ SOLO [Session Save] Error saving session data:`, error);
         }
     };
 
@@ -139,12 +239,6 @@ export default function SoloPage() {
         // Reset error state
         setErrors({work: false, answer: false});
         
-        // Validate that work is shown
-        if (!scratchboardContent.trim()) {
-            setErrors(prev => ({...prev, work: true}));
-            return;
-        }
-        
         // Validate that an answer is provided
         if (!finalAnswer.trim()) {
             setErrors(prev => ({...prev, answer: true}));
@@ -152,6 +246,13 @@ export default function SoloPage() {
         }
         
         if (!currentQuestion) return;
+        
+        // Stop the timer
+        roundEndedRef.current = true;
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
         
         // Normalize answers for comparison (trim whitespace, convert to lowercase)
         const normalizedUserAnswer = finalAnswer.trim().toLowerCase();
@@ -169,6 +270,7 @@ export default function SoloPage() {
         // Save session data with more detailed logs
         console.log(`💾 SOLO [Check Answer] Saving data for question ID: ${currentQuestion.id}`);
         console.log(`💾 SOLO [Check Answer] Scratchboard content length: ${scratchboardContent.length}`);
+        console.log(`💾 SOLO [Check Answer] Time taken: ${timeElapsed} seconds`);
         
         // Save session data immediately
         saveSessionDataToFlow(finalAnswer, false);
@@ -205,9 +307,17 @@ export default function SoloPage() {
         // Add logging
         console.log('⏱️ SOLO [Auto Submit] Time limit reached, auto-submitting answer');
         
+        // Stop the timer
+        roundEndedRef.current = true;
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+        
         const submissionText = finalAnswer || '';
         console.log(`⏱️ SOLO [Auto Submit] Final answer: "${submissionText}"`);
         console.log(`⏱️ SOLO [Auto Submit] Scratchboard content length: ${scratchboardContent.length}`);
+        console.log(`⏱️ SOLO [Auto Submit] Time taken: ${timeElapsed} seconds`);
         
         // Make sure we have a valid question ID
         if (!currentQuestion) {
@@ -238,15 +348,25 @@ export default function SoloPage() {
         );
     }
     
+    // Force enable submit after 10 seconds (safety check)
+    const shouldEnableSubmit = timeElapsed >= 10 || canSubmit;
+    if (timeElapsed >= 10 && !canSubmit) {
+        console.log("Render check: Time is", timeElapsed, "but canSubmit is false. Should be enabled.");
+    }
+    
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D]">
             <div className="container mx-auto p-8">
                 {/* Header */}
                 <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
-                    <h1 className="text-3xl text-white font-bold mb-2">Self-Study Question</h1>
-                    <p className="text-white opacity-70">
-                        Work through this problem and enter your answer. You must show your work to proceed.
-                    </p>
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <h1 className="text-3xl text-white font-bold mb-2">Self-Study Question</h1>
+                            <p className="text-white opacity-70">
+                                Work through this problem and enter your answer.
+                            </p>
+                        </div>
+                    </div>
                 </div>
                 
                 {/* Question Content */}
@@ -254,27 +374,19 @@ export default function SoloPage() {
                     <h2 className="text-xl text-white font-bold mb-4">
                         {formatMathExpression(currentQuestion?.question || "Loading question...")}
                     </h2>
+                    
+                    {/* Remove multiple choice options from question section */}
+                    {/* Multiple choice options will only be shown in the Final Answer Box section below */}
 
-                    {/* Working Space - REQUIRED */}
+                    {/* Working Space - OPTIONAL */}
                     <div className="mb-6">
-                        <label className="block text-white text-sm mb-2 items-center">
-                            <span className="mr-2">Show your work (required):</span>
-                            {errors.work && 
-                                <span className="text-red-400 text-xs">* You must show your work before submitting</span>
-                            }
-                        </label>
                         <textarea
                             value={scratchboardContent}
                             onChange={(e) => {
                                 setScratchboardContent(e.target.value);
-                                if (e.target.value.trim()) {
-                                    setErrors(prev => ({...prev, work: false}));
-                                }
                             }}
-                            className={`w-full h-48 bg-white bg-opacity-10 text-white border rounded-lg p-3 resize-none ${
-                                errors.work ? 'border-red-500' : 'border-gray-600'
-                            }`}
-                            placeholder="Show your reasoning here - explain how you're solving the problem..."
+                            className="w-full h-48 bg-white bg-opacity-10 text-white border rounded-lg p-3 resize-none border-gray-600"
+                            placeholder="Space for scratch work..."
                             disabled={feedback.visible}
                         />
                     </div>
@@ -287,21 +399,53 @@ export default function SoloPage() {
                                 <span className="text-red-400 text-xs">* You must provide an answer</span>
                             }
                         </label>
-                        <input
-                            type="text"
-                            value={finalAnswer}
-                            onChange={(e) => {
-                                setFinalAnswer(e.target.value);
-                                if (e.target.value.trim()) {
-                                    setErrors(prev => ({...prev, answer: false}));
-                                }
-                            }}
-                            className={`w-full bg-white bg-opacity-10 text-white border rounded-lg p-3 ${
-                                errors.answer ? 'border-red-500' : 'border-gray-600'
-                            }`}
-                            placeholder="Enter your answer here..."
-                            disabled={feedback.visible}
-                        />
+                        
+                        {/* Multiple Choice Selection */}
+                        {currentQuestion && currentQuestion.options && (
+                            <div className="grid grid-cols-1 gap-3 mb-4">
+                                {currentQuestion.options.map((option, index) => (
+                                    <div 
+                                        key={index}
+                                        onClick={() => !feedback.visible && setFinalAnswer(option)}
+                                        className={`cursor-pointer p-3 rounded-md border-2 ${
+                                            finalAnswer === option 
+                                                ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
+                                                : 'bg-white bg-opacity-10 border-gray-600'
+                                        } ${feedback.visible ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                    >
+                                        <div className="flex items-center">
+                                            <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
+                                                finalAnswer === option 
+                                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                                    : 'border-gray-400'
+                                            }`}>
+                                                {finalAnswer === option && <span>✓</span>}
+                                            </div>
+                                            <div className="text-white">{formatMathExpression(option)}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        
+                        {/* Text Input for non-multiple choice questions */}
+                        {(!currentQuestion || !currentQuestion.options) && (
+                            <input
+                                type="text"
+                                value={finalAnswer}
+                                onChange={(e) => {
+                                    setFinalAnswer(e.target.value);
+                                    if (e.target.value.trim()) {
+                                        setErrors(prev => ({...prev, answer: false}));
+                                    }
+                                }}
+                                className={`w-full bg-white bg-opacity-10 text-white border rounded-lg p-3 ${
+                                    errors.answer ? 'border-red-500' : 'border-gray-600'
+                                }`}
+                                placeholder="Enter your answer here..."
+                                disabled={feedback.visible}
+                            />
+                        )}
                     </div>
                     
                     {/* Feedback Message */}
@@ -317,10 +461,10 @@ export default function SoloPage() {
                                 : 'Incorrect.'}
                             </p>
                             
-                            {!feedback.correct && currentQuestion?.answer && (
+                            {!feedback.correct && currentQuestion && (
                                 <p className="text-white mt-2">
                                     <span className="font-bold">Correct answer: </span> 
-                                    {formatMathExpression(currentQuestion.answer)}
+                                    {formatMathExpression(currentQuestion.correctAnswer || currentQuestion.answer)}
                                 </p>
                             )}
                         </div>
@@ -331,14 +475,22 @@ export default function SoloPage() {
                         {!feedback.visible ? (
                             <button
                                 onClick={checkAnswer}
-                                className="px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+                                disabled={!finalAnswer.trim() || !shouldEnableSubmit}
+                                className={`px-6 py-3 rounded-lg font-medium ${
+                                    finalAnswer.trim() && shouldEnableSubmit
+                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                }`}
                             >
-                                Submit Answer
+                                {shouldEnableSubmit 
+                                    ? 'Submit Answer' 
+                                    : `Wait ${Math.max(1, 10 - timeElapsed)}s...`
+                                }
                             </button>
                         ) : (
                             <button
                                 onClick={handleFinishLesson}
-                                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg"
+                                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"
                             >
                                 Continue
                             </button>

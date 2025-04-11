@@ -56,8 +56,8 @@ const agents = [
         name: 'Tutor',
         avatar: 'tutor_avatar.svg',
         systemPrompt: `You are a Tutor, an experienced and encouraging math teacher guiding a classroom discussion.
-When evaluating student solutions, first address the student's answer directly:
-1. Begin by clearly stating whether their answer is correct or not
+When evaluating student solutions to multiple choice problems, first address the student's answer directly:
+1. Begin by clearly stating whether their selected answer is correct or not
 2. Point out what they did correctly in their approach
 3. Gently identify any mistakes or misconceptions
 4. Provide a brief explanation of the correct solution approach
@@ -78,9 +78,11 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
    - Use $\\sqrt{x}$ instead of √x
    - Use $\\times$ instead of × or x
    - Use $5 \\cdot 3$ for multiplication instead of 5*3
-4. Never use double $$ delimiters
-5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-6. Format operators properly: $+$, $-$, $\\div$`
+4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
+5. Never use double $$ delimiters
+6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+7. Format operators properly: $+$, $-$, $\\div$
+8. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]`
     },
     {
         id: 'concept',
@@ -93,6 +95,7 @@ IMPORTANT: You MUST make conceptual errors in your problem-solving. You consiste
 
 - You're very confident in your calculations and procedural steps
 - Your numerical work is almost always correct, but your conceptual understanding is flawed
+- For multiple choice problems, you select answers based on correct calculations but with conceptual misunderstandings
 - You MUST misapply at least one key concept in your solution (e.g., using permutations when combinations are needed, applying the wrong probability rule, etc.)
 - You get confused about WHY certain formulas or methods work, not just HOW to use them
 - You occasionally ask classmates to explain the "why" behind mathematical concepts
@@ -107,8 +110,10 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
    - Use $\\frac{1}{2}$ instead of 1/2
    - Use $\\sqrt{x}$ instead of √x
    - Use $\\times$ instead of × or x
-4. Never use double $$ delimiters
-5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
+5. Never use double $$ delimiters
+6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
 
 IMPORTANT: Don't correct your own conceptual misunderstandings unless someone else points them out first. You believe your approach is correct until proven otherwise.`
     },
@@ -123,6 +128,7 @@ IMPORTANT: You MUST make arithmetic errors in your problem-solving. Your calcula
 
 - You're great at explaining the underlying concepts and approaches to problems
 - Your conceptual understanding is excellent, but your numerical work is flawed
+- For multiple choice problems, you select answers that align with your conceptual understanding but with arithmetic errors
 - You MUST include at least one arithmetic error in your calculations (e.g., adding numbers incorrectly, forgetting to simplify, incorrectly multiplying, etc.)
 - You enjoy discussing the deeper meaning behind mathematical methods
 - You can spot conceptual misunderstandings in other students' work
@@ -137,16 +143,40 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
    - Use $\\frac{1}{2}$ instead of 1/2
    - Use $\\sqrt{x}$ instead of √x
    - Use $\\times$ instead of × or x
-4. Never use double $$ delimiters
-5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
+5. Never use double $$ delimiters
+6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
 
 IMPORTANT: Don't correct your own calculation errors unless someone else points them out first. You believe your numerical answers are correct until proven otherwise.`
     }
 ];
 
+// Enhance the SessionData interface to include lessonType
+interface SessionData {
+    questionId: number;
+    questionText: string;
+    startTime: Date;
+    endTime: Date;
+    duration: number;
+    finalAnswer: string;
+    scratchboardContent: string;
+    messages: Message[];
+    isCorrect: boolean;
+    timeoutOccurred: boolean;
+    lessonType?: string; // Add lessonType as optional field
+}
+
 export default function MultiPage() {
     const router = useRouter();
-    const { currentStage, completeLesson, lessonQuestionIndex, userId, saveSessionData: saveToFlowContext } = useFlow();
+    const { 
+        completeLesson, 
+        lessonQuestionIndex, 
+        currentStage, 
+        userId, 
+        saveSessionData: saveToFlowContext,
+        lessonType 
+    } = useFlow();
     const [sessionStartTime] = useState<Date>(new Date());
 
     // State for messages, user input, and UI controls
@@ -171,12 +201,13 @@ export default function MultiPage() {
     const [allQuestions, setAllQuestions] = useState<any[]>([]);
     const [loadedQuestions, setLoadedQuestions] = useState(false);
 
-    // Timer state
-    const [timeLeft, setTimeLeft] = useState(120);
+    // Timer state - Use timeElapsed for pre-submission, timeLeft for post-submission
+    const [timeElapsed, setTimeElapsed] = useState(0); // Time counting up before submission
+    const [timeLeft, setTimeLeft] = useState(90);    // Time counting down after submission
     const roundEndedRef = useRef(false);
+    const [canSubmit, setCanSubmit] = useState(false); // Add state for submit button
 
     // Question tracking
-    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [usedQuestionIndices, setUsedQuestionIndices] = useState<number[]>([]);
     const [currentQuestion, setCurrentQuestion] = useState<any>(null);
 
@@ -201,6 +232,23 @@ export default function MultiPage() {
 
     // Peer messages tracking ref
     const peerMessagesRef = useRef<{ agentId: string, text: string }[]>([]);
+
+    // Add message ref for tracking all messages
+    const messageStateRef = useRef<Message[]>([]);
+
+    // Update the setMessages function to also update the ref
+    const updateMessages = (newMessages: Message[] | ((prev: Message[]) => Message[])) => {
+        if (typeof newMessages === 'function') {
+            setMessages((prev: Message[]) => {
+                const updated = newMessages(prev);
+                messageStateRef.current = updated;
+                return updated;
+            });
+        } else {
+            setMessages(newMessages);
+            messageStateRef.current = newMessages;
+        }
+    };
 
     // Helper function to get question text
     const getQuestionText = (question: any): string => {
@@ -344,18 +392,20 @@ export default function MultiPage() {
     // Use lessonQuestionIndex to determine which question to display
     useEffect(() => {
         if (loadedQuestions && allQuestions.length > 0) {
-            // If lessonQuestionIndex is provided and valid, use it
+            // Always use lessonQuestionIndex from the flow context - this is now predetermined
             if (typeof lessonQuestionIndex === 'number' &&
                 lessonQuestionIndex >= 0 &&
                 lessonQuestionIndex < allQuestions.length) {
+                console.log(`Using predetermined lessonQuestionIndex: ${lessonQuestionIndex}`);
                 setCurrentQuestion(allQuestions[lessonQuestionIndex]);
-                setCurrentQuestionIndex(lessonQuestionIndex);
+                // Don't update currentQuestionIndex state anymore
             } else {
-                // Otherwise use the currentQuestionIndex state
-                setCurrentQuestion(allQuestions[currentQuestionIndex]);
+                // Fallback only if there's an issue with lessonQuestionIndex
+                console.warn(`Invalid lessonQuestionIndex: ${lessonQuestionIndex}, using default question`);
+                setCurrentQuestion(allQuestions[0]);
             }
         }
-    }, [loadedQuestions, allQuestions, lessonQuestionIndex, currentQuestionIndex]);
+    }, [loadedQuestions, allQuestions, lessonQuestionIndex]);
 
     // Auto-scroll when messages change
     useEffect(() => {
@@ -373,11 +423,9 @@ export default function MultiPage() {
     useEffect(() => {
         if (!currentQuestion) return;
 
-        if (timeLeft <= 0) {
-            if (!hasSubmittedAnswer) {
-                // Handle pre-submission timeout
-                autoSubmitTimeoutAnswer();
-            } else {
+        if (hasSubmittedAnswer) {
+            // Post-submission phase - Use decreasing timer (countdown)
+            if (timeLeft <= 0) {
                 // Discussion phase timeout - navigate to next page
                 console.log('Discussion time expired - navigating to next page');
                 
@@ -389,7 +437,7 @@ export default function MultiPage() {
                 
                 // Add message about moving on
                 const timeUpMessageId = getUniqueMessageId();
-                setMessages(prev => [
+                updateMessages(prev => [
                     ...prev,
                     {
                         id: timeUpMessageId,
@@ -399,23 +447,49 @@ export default function MultiPage() {
                     }
                 ]);
                 
-                // Add a longer delay before navigating to ensure state updates are complete
-                setTimeout(() => {
-                    console.log('Completing lesson and transitioning to break...');
-                    completeLesson();
-                }, 3000); // Increased from 2000 to 3000ms
+                // Save final session data before navigating - this is the ONE point where we save
+                console.log('Saving final session data before completing lesson');
+                saveSessionData(finalAnswer || "No answer provided", false)
+                  .then(() => {
+                      console.log('Final session data saved successfully, completing lesson now');
+                      // Add a delay before navigating to ensure state updates are complete
+                      setTimeout(() => {
+                          console.log('Completing lesson and transitioning to break...');
+                          completeLesson();
+                      }, 2000);
+                  })
+                  .catch(error => {
+                      console.error('Error saving final session data:', error);
+                      // Still proceed with lesson completion even if save fails
+                      setTimeout(() => {
+                          completeLesson();
+                      }, 2000);
+                  });
+                return;
             }
-            return;
+
+            if (roundEndedRef.current) return;
+
+            const timerId = setTimeout(() => {
+                setTimeLeft((prevTime) => prevTime - 1);
+            }, 1000);
+
+            return () => clearTimeout(timerId);
+        } else {
+            // Pre-submission phase - Use increasing timer (count up)
+            if (roundEndedRef.current) return;
+
+            const timerId = setTimeout(() => {
+                setTimeElapsed((prevTime) => prevTime + 1);
+                // Enable submit button after 10 seconds
+                if (timeElapsed >= 9) {
+                    setCanSubmit(true);
+                }
+            }, 1000);
+
+            return () => clearTimeout(timerId);
         }
-
-        if (roundEndedRef.current) return;
-
-        const timerId = setTimeout(() => {
-            setTimeLeft((prevTime) => prevTime - 1);
-        }, 1000);
-
-        return () => clearTimeout(timerId);
-    }, [timeLeft, hasSubmittedAnswer, currentQuestion]);
+    }, [timeLeft, timeElapsed, hasSubmittedAnswer, currentQuestion]);
 
     // Add useEffect to periodically check for intervention triggers
     useEffect(() => {
@@ -460,12 +534,16 @@ export default function MultiPage() {
 
     // Add a function to check answer correctness
     const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
-        if (!question || !question.correctAnswer) return false;
-
-        // Simple string comparison (enhance as needed)
+        if (!question) return false;
+        
+        // Check for correctAnswer first, then fall back to answer
+        const correctAnswer = question.correctAnswer || question.answer;
+        if (!correctAnswer) return false;
+        
+        // Simple string comparison for multiple choice options
         const normalizedUserAnswer = userAnswer.trim().toLowerCase();
-        const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
-
+        const normalizedCorrectAnswer = correctAnswer.trim().toLowerCase();
+        
         return normalizedUserAnswer === normalizedCorrectAnswer;
     };
 
@@ -530,29 +608,49 @@ export default function MultiPage() {
         }
     };
 
-    // Modified saveSessionData function (keep everything else the same)
+    // Modified saveSessionData function with enhanced logging
     const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
-            // Calculate session duration in seconds using submission time
+            // Calculate session duration - only count time until answer submission
             const endTime = submissionTime || new Date();
             const durationMs = endTime.getTime() - sessionStartTime.getTime();
             const durationSeconds = Math.floor(durationMs / 1000);
-
+            
             // Get the question text
-            const questionText = getQuestionText(currentQuestion);
-
+            const questionText = currentQuestion?.question || '';
+            
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
-
-            // Log raw messages before cleaning
-            console.log(`💾 MULTI [Session Save] Original messages count: ${messages.length}`);
-
-            // Clean messages for database storage
-            const cleanedMessages = prepareMessagesForStorage(messages);
             
-            console.log(`💾 MULTI [Session Save] Saving ${messages.length} messages (${cleanedMessages.length} after cleaning)`);
+            // Use the message ref instead of state
+            const currentMessages = messageStateRef.current;
             
-            // Add additional message verification
+            console.log(`💾 MULTI [Session Save Detail] Saving ${currentMessages.length} messages:`);
+            currentMessages.forEach((msg, idx) => {
+                if (idx < 3 || idx >= currentMessages.length - 2) {
+                    console.log(`Message ${idx}: sender=${msg.sender}, id=${msg.id}, text preview=${typeof msg.text === 'string' ? msg.text.substring(0, 30) : 'non-string'}...`);
+                }
+            });
+            
+            // Clean and prepare messages for storage
+            const messagesWithFaults = currentMessages.filter(msg => 
+                !msg.id || !msg.sender || !msg.text
+            );
+            
+            if (messagesWithFaults.length > 0) {
+                console.warn(`⚠️ MULTI Found ${messagesWithFaults.length} messages with missing properties`);
+            }
+            
+            // Loop through messages and ensure each has required properties with defaults
+            const cleanedMessages = currentMessages.map(msg => ({
+                id: msg.id || Date.now(),
+                sender: msg.sender || 'unknown',
+                text: typeof msg.text === 'string' ? msg.text : String(msg.text || 'No content'),
+                agentId: msg.agentId || null,
+                timestamp: new Date(msg.timestamp || Date.now()), // Ensure timestamp is a Date object
+            }));
+            
+            // Double check that all messages have required properties
             const messagesWithoutProperties = cleanedMessages.filter(msg => 
                 !msg.id || !msg.sender || !msg.text || !msg.timestamp
             );
@@ -561,9 +659,13 @@ export default function MultiPage() {
                 console.warn(`⚠️ MULTI Found ${messagesWithoutProperties.length} messages with missing properties`);
             }
             
+            // Log session details including scenario type
+            console.log(`💾 MULTI [Session Save] Saving data for question ${lessonQuestionIndex}, scenario: ${lessonType}`);
+            console.log(`💾 MULTI [Session Save] Message count: ${cleanedMessages.length}`);
+            
             // Save to flow context instead of calling SessionService directly
             saveToFlowContext({
-                questionId: currentQuestionIndex,
+                questionId: lessonQuestionIndex,
                 questionText,
                 startTime: sessionStartTime,
                 endTime,
@@ -572,18 +674,30 @@ export default function MultiPage() {
                 scratchboardContent,
                 messages: cleanedMessages,
                 isCorrect,
-                timeoutOccurred: isTimeout
-            });
+                timeoutOccurred: isTimeout,
+                lessonType // Include the scenario type
+            } as any); // Type assertion to avoid type errors
 
             console.log(`✅ MULTI [Session Save] Data saved to flow context successfully with ${cleanedMessages.length} messages`);
+            return true;
         } catch (error) {
             console.error(`❌ MULTI [Session Save] Error saving session data:`, error);
+            return false;
         }
     };
 
     // Handle submission of answer
     const handleSend = () => {
-        if (!finalAnswer.trim() || !scratchboardContent.trim()) return;
+        // If this is a multiple choice question, require selection of an option
+        if (currentQuestion && currentQuestion.options && currentQuestion.options.length > 0) {
+            if (!finalAnswer.trim()) {
+                console.log('Missing required field: answer selection');
+                return;
+            }
+        } else {
+            // For non-multiple choice, just check if there's a final answer
+            if (!finalAnswer.trim()) return;
+        }
 
         setLastUserActivityTime(Date.now());
 
@@ -595,11 +709,12 @@ export default function MultiPage() {
             const userFinalAnswer: Message = {
                 id: getUniqueMessageId(),
                 sender: 'user',
-                text: `My final answer is: ${finalAnswer}\n\nMy reasoning:\n${scratchboardContent}`,
+                text: `My final answer is: ${finalAnswer}\n\nMy reasoning:\n${scratchboardContent || "No work shown"}`,
                 timestamp: new Date().toISOString()
             };
 
-            setMessages([userFinalAnswer]); // Start with just the user's answer
+            // Update messages by appending the user's answer instead of resetting
+            updateMessages(prev => [...prev, userFinalAnswer]);
             setHasSubmittedAnswer(true); // Mark answer as submitted
 
             // Stop the timer when chat interface appears
@@ -608,15 +723,12 @@ export default function MultiPage() {
             // Disable questioning initially - it will be enabled after the AI discussion sequence
             setIsQuestioningEnabled(false);
 
-            // Save session data before starting discussion
-            saveSessionData(finalAnswer, false);
-
             // Start classroom discussion after submission
-            startClassroomDiscussion(currentQuestion, finalAnswer, scratchboardContent);
+            startClassroomDiscussion(currentQuestion, finalAnswer, scratchboardContent || "No work shown");
         });
     };
 
-    // Function to auto-submit when timer expires
+    // Function to auto-submit when timer expires - now only used for manual timeout
     const autoSubmitTimeoutAnswer = () => {
         console.log('Auto-submitting answer due to timeout');
 
@@ -626,7 +738,7 @@ export default function MultiPage() {
         setHasSubmittedAnswer(true);
 
         // Use current values, even if empty
-        const submissionText = finalAnswer.trim() || "No answer provided";
+        const submissionText = finalAnswer.trim() || "No answer selected";
 
         // Create a user message with the timeout info
         const userTimeoutMessage: Message = {
@@ -639,20 +751,82 @@ export default function MultiPage() {
         // Add message and start classroom discussion directly
         setMessages([userTimeoutMessage]);
 
-        // Do NOT save session data here - wait until the discussion is complete
-        // This prevents duplicate session data submission
-
         // Use the same flow as normal submission
         startClassroomDiscussion(currentQuestion, submissionText, scratchboardContent);
     };
 
-    // Modify startClassroomDiscussion for improved flow
-    const startClassroomDiscussion = (question: any, studentAnswer: string, scratchpad: string) => {
+    // Update handleTimeExpired to be the only other place where session data is saved
+    const handleTimeExpired = async () => {
+        if (hasSubmittedAnswer) return;
+        
+        const now = new Date();
+        setSubmissionTime(now);
+        setHasSubmittedAnswer(true);
+        
+        // Create timeout message to inform user
+        const timeoutMessage: Message = {
+            id: getUniqueMessageId(),
+            sender: 'user',
+            text: `My partial answer: ${finalAnswer || "No answer provided"}\n\nMy work so far:\n${scratchboardContent || "No work shown"}`,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Use updateMessages to ensure message reference is updated
+        updateMessages([timeoutMessage]);
+        
+        // Then add confirmation message
+        const confirmationMessage: Message = {
+            id: getUniqueMessageId(),
+            sender: 'system',
+            text: "Time's up! Your session data is being saved...",
+            timestamp: new Date().toISOString()
+        };
+        
+        // Add confirmation message to the chat
+        updateMessages(prev => [...prev, confirmationMessage]);
+        
+        // Save session data with timeout flag - this is the ONE other point where we save
+        try {
+            console.log('Saving final session data before completing lesson due to timeout');
+            await saveSessionData(finalAnswer || "No answer provided", true);
+            
+            // Update confirmation message to show success
+            updateMessages(prev => prev.map(msg => 
+                msg.id === confirmationMessage.id
+                    ? {...msg, text: "Time's up! Your session data has been saved successfully."}
+                    : msg
+            ));
+            
+            console.log("Final session data saved successfully on timeout");
+            
+            // Wait a moment before completing the lesson
+            setTimeout(() => {
+                completeLesson();
+            }, 2000);
+        } catch (error) {
+            console.error("Error saving final session data:", error);
+            
+            // Update confirmation message to show failure
+            updateMessages(prev => prev.map(msg => 
+                msg.id === confirmationMessage.id
+                    ? {...msg, text: "Time's up! There was an issue saving your data."}
+                    : msg
+            ));
+            
+            // Still complete the lesson after a delay
+            setTimeout(() => {
+                completeLesson();
+            }, 2000);
+        }
+    };
+
+    // Update startClassroomDiscussion to use the message ref
+    const startClassroomDiscussion = async (question: any, studentAnswer: string, scratchpad: string) => {
         // Reset peer messages tracking at the start of a new discussion
         peerMessagesRef.current = [];
-
+        
         // Reset discussion timer to 2 minutes
-        setTimeLeft(120);
+        setTimeLeft(90);
         roundEndedRef.current = false;
         
         // Create user answer message
@@ -676,7 +850,7 @@ export default function MultiPage() {
         const firstPeerId = getUniqueMessageId();
         
         // Set messages with user answer first, then first responder
-        setMessages([
+        updateMessages([
             userAnswerMessage,
             {
                 id: firstPeerId,
@@ -693,7 +867,7 @@ export default function MultiPage() {
                             const secondPeerId = getUniqueMessageId();
                             
                             // Add second peer's message
-                            setMessages(prev => [
+                            updateMessages(prev => [
                                 ...prev,
                                 {
                                     id: secondPeerId,
@@ -711,7 +885,7 @@ export default function MultiPage() {
                                             
                                             console.log("Captured peer messages for tutor from ref:", peerMessages);
                                             
-                                            setMessages(prev => [
+                                            updateMessages(prev => [
                                                 ...prev,
                                                 {
                                                     id: tutorId,
@@ -820,16 +994,29 @@ export default function MultiPage() {
             const correctAnswer = typeof currentQuestion === 'object' && currentQuestion.correctAnswer 
                 ? currentQuestion.correctAnswer 
                 : 'not provided';
+            
+            // Get multiple choice options if available
+            const options = typeof currentQuestion === 'object' && currentQuestion.options 
+                ? currentQuestion.options 
+                : [];
 
             // Build prompt for peer's initial response
             let promptText = `The current problem is: ${questionText}\n\n`;
+
+            if (options.length > 0) {
+                promptText += `The available answer options are:\n`;
+                options.forEach((option: string, index: number) => {
+                    promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
+                });
+                promptText += `\n`;
+            }
 
             if (correctAnswer) {
                 promptText += `The correct answer is: ${correctAnswer}\n\n`;
             }
 
-            promptText += `As ${agent.name}, provide your answer to this problem in this format:
-1. Start with "My answer is [your answer]."
+            promptText += `As ${agent.name}, provide your answer to this multiple choice problem in this format:
+1. Start with "I choose option [letter/answer]."
 2. Then explain your reasoning process with "This is how I solved it..."
 3. Show your work and calculations
 4. Make sure your response maintains your character's traits (calculation skills but conceptual confusion OR conceptual understanding but arithmetic errors)`;
@@ -872,9 +1059,9 @@ export default function MultiPage() {
             let fallbackText = '';
 
             if (agent.id === 'concept') {
-                fallbackText = "My answer is [answer]. This is how I solved it: I followed the steps carefully and made sure to calculate each part correctly...";
+                fallbackText = "I choose option B. This is how I solved it: I followed the steps carefully and made sure to calculate each part correctly...";
             } else if (agent.id === 'arithmetic') {
-                fallbackText = "My answer is [answer]. This is how I solved it: Looking at the conceptual framework, I identified the key relationship between...";
+                fallbackText = "I choose option A. This is how I solved it: Looking at the conceptual framework, I identified the key relationship between...";
             }
 
             setMessages(prev => prev.map(msg =>
@@ -971,7 +1158,7 @@ export default function MultiPage() {
         }
     };
 
-    // Update the generateTutorAnalysis function to better handle peer messages
+    // Update the generateTutorAnalysis function to handle multiple choice
     const generateTutorAnalysis = async (
         messageId: number,
         question: any,
@@ -980,15 +1167,28 @@ export default function MultiPage() {
         peerMessages: { agentId: string, text: string }[]
     ) => {
         const questionText = getQuestionText(question);
-        const correctAnswer = question?.answer || question?.correctAnswer || "not provided";
+        const correctAnswer = question?.correctAnswer || question?.answer || "not provided";
+        
+        // Get options if available
+        const options = question?.options || [];
+        const isMultipleChoice = options.length > 0;
 
         try {
             // Build prompt for tutor's analysis
             let promptText = `The current problem is: ${questionText}\n\n`;
+            
+            if (isMultipleChoice) {
+                promptText += `This is a multiple choice problem with the following options:\n`;
+                options.forEach((option: string, index: number) => {
+                    promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
+                });
+                promptText += `\n`;
+            }
+            
             promptText += `The correct answer is: ${correctAnswer}\n\n`;
             
             // First analyze the student's answer (keep this part first)
-            promptText += `The student's answer was: ${studentAnswer}\n\n`;
+            promptText += `The student's selected answer was: ${studentAnswer}\n\n`;
             promptText += `The student's work: ${scratchpad}\n\n`;
             
             // Then include peer responses
@@ -1000,9 +1200,9 @@ export default function MultiPage() {
                 });
             }
             
-            promptText += `As an experienced and encouraging math teacher, provide feedback in a friendly, conversational tone. Structure your response in a natural way with several paragraphs:
+            promptText += `As an experienced and encouraging math teacher, provide feedback on this multiple choice problem in a friendly, conversational tone. Structure your response in a natural way with several paragraphs:
 
-Begin with your assessment of the student's answer, acknowledging what they did well while gently identifying any misconceptions.
+Begin with your assessment of the student's selected answer, acknowledging what they did well while gently identifying any misconceptions.
 
 In your next paragraph, address Arithmetic Gap's approach. You MUST identify the specific arithmetic error they made in their calculations, while acknowledging their conceptual strengths. Be specific about what calculation was performed incorrectly.
 
@@ -1039,7 +1239,7 @@ Your response should flow naturally like a real classroom conversation, not as a
             console.error("Error generating tutor analysis:", error);
             
             // Simple error fallback
-            const fallbackText = `I see your answer is "${studentAnswer}". The correct answer is ${correctAnswer}. Looking at your work and comparing it with other approaches, I'd like to offer some insights on how you might think about this problem differently.`;
+            const fallbackText = `I see you selected "${studentAnswer}". The correct answer is ${correctAnswer}. Looking at your work and comparing it with other approaches, I'd like to offer some insights on how you might think about this problem differently.`;
             
             // Update message with fallback
             setMessages(prev => prev.map(msg =>
@@ -1059,77 +1259,96 @@ Your response should flow naturally like a real classroom conversation, not as a
 
     // Update the handleUserQuestion to separate interruption from sending
     const handleUserQuestion = () => {
-        if (!input.trim()) return;
+        if (!input.trim() || !isQuestioningEnabled) return;
 
-        // Skip any ongoing typewriter animations by clearing the typing IDs
+        // Skip any ongoing typewriter animations if user sends a new message
         if (typingMessageIds.length > 0) {
-            console.log("User interrupted typewriter animation by sending a message");
-            setTypingMessageIds([]);
+            setSkipTypewriter(true);
+            setTimeout(() => {
+                setTypingMessageIds([]);
+                sendUserQuestion();
+            }, 50);
+        } else {
+            sendUserQuestion();
         }
+    };
 
-        // Create user message
+    // Update the sendUserQuestion function to not save after each message
+    const sendUserQuestion = () => {
         const userMessageId = getUniqueMessageId();
-        const userMessage = {
+        const userMessage: Message = {
             id: userMessageId,
             sender: 'user',
             text: input,
             timestamp: new Date().toISOString()
         };
 
-        // Add to messages
-        setMessages(prev => [...prev, userMessage]);
-        setInput(''); // Clear input field
+        // Use updateMessages to ensure message reference is updated
+        updateMessages(prev => [...prev, userMessage]);
+        
+        // Clear input
+        setInput('');
 
         // Force scroll to bottom
         forceScrollToBottomRef.current = true;
         setTimeout(() => scrollToBottom(true), 50);
 
-        // Check if a specific bot was mentioned
-        const mentionedBot = checkForBotMention(input);
-        
-        if (mentionedBot) {
-            generateSingleBotResponse(input, mentionedBot);
-        } else {
-            generateSequentialResponse(input);
-        }
-
         // Reset intervention flags
         interventionRef.current = false;
         setLastMessageTime(Date.now());
         setBotThinking(false);
+
+        // Check if a specific bot was mentioned
+        const mentionedBot = checkForBotMention(input);
+        
+        if (mentionedBot) {
+            console.log(`User mentioned ${mentionedBot}`);
+            generateSingleBotResponse(input, mentionedBot);
+        } else {
+            // Generate sequential responses from all participants
+            generateSequentialResponse(input);
+        }
     };
 
-    // Function for when a specific bot is mentioned
+    // Fix the generateSingleBotResponse function by retaining the structure
     const generateSingleBotResponse = async (userQuestion: string, mentionedBot: string) => {
-        // Find the specified agent
-        const agent = agents.find(a => a.id === mentionedBot);
-        if (!agent) return;
+        // Find the mentioned bot
+        const bot = agents.find(a => a.id === mentionedBot);
+        if (!bot) return;
 
-        console.log(`Generating response from ${agent.name}`);
-        setBotThinking(true);
+        // Create a placeholder message for the bot
+        const botMessageId = getUniqueMessageId();
+        updateMessages(prev => [
+            ...prev,
+            {
+                id: botMessageId,
+                sender: 'ai',
+                text: '...',
+                agentId: bot.id,
+                timestamp: new Date().toISOString(),
+                onComplete: () => {
+                    // No session save here
+                }
+            }
+        ]);
 
-        // Create a message ID for the response
-        const messageId = getUniqueMessageId();
-
-        // Add typing indicator
-        setMessages(prev => [...prev, {
-            id: messageId,
-            sender: 'ai',
-            text: '...',
-            agentId: agent.id,
-            timestamp: new Date().toISOString()
-        }]);
+        // Add to typing IDs
+        setTypingMessageIds(prev => [...prev, botMessageId]);
 
         try {
-            // Format the question text
-            const questionText = getQuestionText(currentQuestion);
+            console.log(`Generating response from ${bot.name}`);
+            setBotThinking(true);
 
-            // Generate prompt based on which agent was mentioned
-            let promptText = `The current problem is: ${questionText}\n\n`;
-            promptText += `A student asked you directly: "${userQuestion}"\n\n`;
+            try {
+                // Format the question text
+                const questionText = getQuestionText(currentQuestion);
 
-            if (mentionedBot === 'tutor') {
-                promptText += `As the teacher (Tutor), respond as follows:
+                // Generate prompt based on which agent was mentioned
+                let promptText = `The current problem is: ${questionText}\n\n`;
+                promptText += `A student asked you directly: "${userQuestion}"\n\n`;
+
+                if (mentionedBot === 'tutor') {
+                    promptText += `As the teacher (Tutor), respond as follows:
 1. First, explicitly identify what the student is asking about
 2. DIRECTLY address their specific question - do not go off on tangents 
 3. Provide a clear, focused explanation that precisely answers their exact question
@@ -1137,70 +1356,92 @@ Your response should flow naturally like a real classroom conversation, not as a
 5. Don't introduce unrelated concepts
 
 Your answer should be laser-focused on answering exactly what they asked and nothing more.`;
-            } else if (mentionedBot === 'concept') {
-                // Concept Gap prompt unchanged
-                promptText += `As Concept Gap, respond to the student's question.
+                } else if (mentionedBot === 'concept') {
+                    // Concept Gap prompt unchanged
+                    promptText += `As Concept Gap, respond to the student's question.
 
 Focus on calculation approaches and step-by-step arithmetic. You may express confusion about deeper concepts while being confident in your numerical work.`;
-            } else if (mentionedBot === 'arithmetic') {
-                // Arithmetic Gap prompt unchanged
-                promptText += `As Arithmetic Gap, respond to the student's question.
+                } else if (mentionedBot === 'arithmetic') {
+                    // Arithmetic Gap prompt unchanged
+                    promptText += `As Arithmetic Gap, respond to the student's question.
 
 Focus on conceptual understanding and mathematical principles. You may make small calculation errors while being confident in your conceptual explanations.`;
-            }
-
-            // Generate response
-            const response = await aiService.generateResponse(
-                [{ id: 1, sender: 'user', text: promptText }],
-                {
-                    systemPrompt: agent.systemPrompt,
-                    model: currentModel
                 }
-            );
 
-            // Replace typing indicator with actual response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: typeof response === 'string' ? response : JSON.stringify(response),
-                        timestamp: new Date().toISOString()
+                // Generate response
+                const response = await aiService.generateResponse(
+                    [{ id: 1, sender: 'user', text: promptText }],
+                    {
+                        systemPrompt: bot.systemPrompt,
+                        model: currentModel
                     }
-                    : msg
-            ));
+                );
 
-            // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, messageId]);
+                // Replace typing indicator with actual response
+                updateMessages(prev => {
+                    const updatedMessages = prev.map(msg =>
+                        msg.id === botMessageId
+                            ? {
+                                ...msg,
+                                text: typeof response === 'string' ? response : JSON.stringify(response),
+                                timestamp: new Date().toISOString()
+                            }
+                            : msg
+                    );
+                    return updatedMessages;
+                });
 
-        } catch (error) {
-            console.error(`Error generating ${agent.name}'s response:`, error);
+                // Add to typing state for typewriter effect
+                setTypingMessageIds(prev => [...prev, botMessageId]);
 
-            // Provide character-appropriate fallback
-            let fallbackText = '';
+            } catch (error) {
+                console.error(`Error generating ${bot.name}'s response:`, error);
 
-            if (mentionedBot === 'tutor') {
-                fallbackText = "You're asking specifically about [key aspect of question]. Let me address that directly...";
-            } else if (mentionedBot === 'concept') {
-                fallbackText = "I think I can help with the calculation part of that. Let me work through the steps... though I'm not fully clear on why this conceptual approach is better.";
-            } else if (mentionedBot === 'arithmetic') {
-                fallbackText = "From a conceptual standpoint, this problem is about understanding the relationship between the constraints. The key insight is... though I might have made a small error in my arithmetic.";
+                // Provide character-appropriate fallback
+                let fallbackText = '';
+
+                if (mentionedBot === 'tutor') {
+                    fallbackText = "You're asking specifically about [key aspect of question]. Let me address that directly...";
+                } else if (mentionedBot === 'concept') {
+                    fallbackText = "I think I can help with the calculation part of that. Let me work through the steps... though I'm not fully clear on why this conceptual approach is better.";
+                } else if (mentionedBot === 'arithmetic') {
+                    fallbackText = "From a conceptual standpoint, this problem is about understanding the relationship between the constraints. The key insight is... though I might have made a small error in my arithmetic.";
+                }
+
+                updateMessages(prev => {
+                    const updatedMessages = prev.map(msg =>
+                        msg.id === botMessageId
+                            ? {
+                                ...msg,
+                                text: fallbackText,
+                                timestamp: new Date().toISOString()
+                            }
+                            : msg
+                    );
+                    return updatedMessages;
+                });
+            } finally {
+                setBotThinking(false);
             }
-
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: fallbackText,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-        } finally {
+        } catch (error) {
+            console.error(`Error generating ${bot.name}'s response:`, error);
             setBotThinking(false);
+            updateMessages(prev => {
+                const updatedMessages = prev.map(msg =>
+                    msg.id === botMessageId
+                        ? {
+                            ...msg,
+                            text: "Sorry, I couldn't generate a response. Please try again.",
+                            timestamp: new Date().toISOString()
+                        }
+                        : msg
+                );
+                return updatedMessages;
+            });
         }
     };
 
-    // Enhance sequential responses for more dynamic conversation
+    // Fix the generateSequentialResponse function to use existing functions
     const generateSequentialResponse = (userQuestion: string) => {
         // CRITICAL FIX: Randomly select ONE agent from all three instead of always starting with Tutor
         const allAgents = [...agents]; // This includes tutor, concept, and arithmetic
@@ -1209,311 +1450,8 @@ Focus on conceptual understanding and mathematical principles. You may make smal
         
         console.log(`Random agent selected to respond: ${selectedAgent.name}`);
         
-        // Create message ID for the selected agent
-        const responseId = getUniqueMessageId();
-        
-        // Add message placeholder for just one agent
-        setMessages(prev => [
-            ...prev,
-            {
-                id: responseId,
-                sender: 'ai',
-                text: '...',
-                agentId: selectedAgent.id,
-                timestamp: new Date().toISOString(),
-                // No onComplete handler that would trigger additional responses
-            }
-        ]);
-        
-        // Generate response based on which agent was selected
-        if (selectedAgent.id === 'tutor') {
-            generateTeacherQuestionResponse(responseId, userQuestion);
-        } else {
-            // For student agents (concept or arithmetic)
-            generateStudentQuestionResponse(responseId, selectedAgent.id, userQuestion, null);
-        }
-    };
-
-    // Add function for the second peer to respond in a conversation
-    const generateStudentFollowupResponse = async (
-        messageId: number,
-        studentId: string,
-        userQuestion: string,
-        teacherResponseId: number,
-        firstPeerResponseId: number
-    ) => {
-        try {
-            // Get the student agent
-            const studentAgent = agents.find(a => a.id === studentId);
-            if (!studentAgent) return;
-
-            // Get previous messages for context
-            const teacherResponse = messages.find(m => m.id === teacherResponseId);
-            const firstPeerResponse = messages.find(m => m.id === firstPeerResponseId);
-
-            const teacherText = teacherResponse && teacherResponse.text !== '...' 
-                ? teacherResponse.text 
-                : "Let's think about this question...";
-
-            const firstPeerText = firstPeerResponse && firstPeerResponse.text !== '...'
-                ? firstPeerResponse.text
-                : "I think the approach is...";
-
-            const firstPeerId = firstPeerResponse?.agentId || (studentId === 'concept' ? 'arithmetic' : 'concept');
-            const firstPeerName = agents.find(a => a.id === firstPeerId)?.name || 'another student';
-
-            // Format the question text
-            const questionText = getQuestionText(currentQuestion);
-
-            // Add this line before using correctAnswer:
-            const correctAnswer = typeof currentQuestion === 'object' && currentQuestion.correctAnswer 
-                ? currentQuestion.correctAnswer 
-                : 'not provided';
-
-            let promptText = `The current problem is: ${questionText}\n\n`;
-            promptText += `A student asked: "${userQuestion}"\n\n`;
-            promptText += `The teacher (Tutor) responded: "${teacherText}"\n\n`;
-            promptText += `${firstPeerName} then said: "${firstPeerText}"\n\n`;
-
-            if (studentId === 'concept') {
-                promptText += `As Concept Gap, add to the ongoing discussion by responding to both the teacher's explanation AND what ${firstPeerName} said.
-
-Your response should:
-1. Focus on any CALCULATION aspects related to the question
-2. Show your numerical approach to relevant parts of the problem
-3. Express some confusion about a conceptual aspect if appropriate
-4. Agree or disagree with specific points made by ${firstPeerName}
-5. Be conversational and natural as part of a classroom discussion
-
-You should sound like a student who's confident about arithmetic but sometimes misunderstands the deeper concepts.`;
-            } else {
-                promptText += `As Arithmetic Gap, add to the ongoing discussion by responding to both the teacher's explanation AND what ${firstPeerName} said.
-
-Your response should:
-1. Focus on the CONCEPTUAL aspects related to the question
-2. Explain the underlying principles or approach to the problem
-3. Make a small arithmetic error somewhere if you provide calculations
-4. Agree or disagree with specific points made by ${firstPeerName}
-5. Be conversational and natural as part of a classroom discussion
-
-You should sound like a student who deeply understands mathematical concepts but sometimes makes arithmetic errors.`;
-            }
-
-            // Generate student's response
-            const response = await aiService.generateResponse(
-                [{ id: 1, sender: 'user', text: promptText }],
-                {
-                    systemPrompt: studentAgent.systemPrompt,
-                    model: currentModel
-                }
-            );
-
-            // Replace typing indicator with actual response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: typeof response === 'string' ? response : JSON.stringify(response),
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, messageId]);
-
-        } catch (error) {
-            console.error(`Error generating ${studentId}'s followup response:`, error);
-
-            // Define fallback responses based on student type
-            let fallbackText = '';
-            if (studentId === 'concept') {
-                fallbackText = "I see what both of you are saying about the problem. I think I can add to this by working through the steps numerically. For this type of problem, we'd use this formula... though I'm not fully clear on why this specific approach is better.";
-            } else {
-                fallbackText = "Building on what was just said, I think there's an important principle here about how these constraints work mathematically. The key insight is... though I might be making a calculation error in working it out.";
-            }
-
-            // Replace typing indicator with fallback response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: fallbackText,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, messageId]);
-        }
-    };
-
-    // Function for generating teacher responses to questions
-    const generateTeacherQuestionResponse = async (messageId: number, userQuestion: string) => {
-        try {
-            // Format the question text
-            const questionText = getQuestionText(currentQuestion);
-
-            // Generate teacher's response
-            const response = await aiService.generateResponse(
-                [
-                    { 
-                        id: 1, 
-                        sender: 'user', 
-                        text: `The current problem we're working on is: ${questionText}` 
-                    },
-                    { 
-                        id: 2, 
-                        sender: 'user', 
-                        text: `A student asked this specific question: "${userQuestion}"
-
-As the teacher (Tutor), respond as follows:
-1. First, explicitly identify what the student is asking about
-2. DIRECTLY address their specific question - do not go off on tangents
-3. Provide a clear, focused explanation that precisely answers their exact question
-4. Be thorough but stay focused on exactly what they asked
-5. Don't introduce unrelated concepts
-
-Your answer should be laser-focused on answering exactly what they asked and nothing more.`
-                    }
-                ],
-                {
-                    systemPrompt: agents[0].systemPrompt,
-                    model: currentModel
-                }
-            );
-
-            // Replace typing indicator with actual response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: typeof response === 'string' ? response : JSON.stringify(response),
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, messageId]);
-
-        } catch (error) {
-            console.error(`Error generating teacher's response:`, error);
-            // Provide fallback
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: "I see you're asking about [specific aspect]. Let me address that directly...",
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-        }
-    };
-
-    // Function for generating student responses to questions
-    const generateStudentQuestionResponse = async (
-        messageId: number, 
-        studentId: string, 
-        userQuestion: string,
-        teacherResponseId: number | null
-    ) => {
-        try {
-            // Get the student agent
-            const studentAgent = agents.find(a => a.id === studentId);
-            if (!studentAgent) return;
-
-            // Get teacher's response if available (now optional)
-            let teacherText = "";
-            if (teacherResponseId) {
-                const teacherResponse = messages.find(m => m.id === teacherResponseId);
-                if (teacherResponse && teacherResponse.text !== '...' && typeof teacherResponse.text === 'string') {
-                    teacherText = teacherResponse.text;
-                }
-            }
-
-            // Format the question text
-            const questionText = getQuestionText(currentQuestion);
-
-            // Build prompt with or without teacher context
-            let promptText = `The current problem is: ${questionText}\n\n`;
-            promptText += `A student asked: "${userQuestion}"\n\n`;
-            
-            // Only include teacher's response if it exists
-            if (teacherText) {
-                promptText += `The teacher (Tutor) responded: "${teacherText}"\n\n`;
-            }
-
-            if (studentId === 'concept') {
-                promptText += `As Concept Gap, respond directly to the student's question in a classroom setting.
-
-Your response should:
-1. Focus on calculation approaches and step-by-step arithmetic
-2. Show your numerical approach with specific calculations
-3. Be confident about your arithmetic working
-4. Express some confusion about deeper conceptual aspects if relevant
-5. Be conversational and natural as part of a classroom discussion`;
-            } else {
-                promptText += `As Arithmetic Gap, respond directly to the student's question in a classroom setting.
-
-Your response should:
-1. Focus on explaining the underlying concepts and principles
-2. Clearly articulate the mathematical reasoning involved
-3. Be confident about your conceptual understanding
-4. Include a minor arithmetic error somewhere in your calculations
-5. Be conversational and natural as part of a classroom discussion`;
-            }
-
-            // Generate student's response
-            const response = await aiService.generateResponse(
-                [{ id: 1, sender: 'user', text: promptText }],
-                {
-                    systemPrompt: studentAgent.systemPrompt,
-                    model: currentModel
-                }
-            );
-
-            // Replace typing indicator with actual response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: typeof response === 'string' ? response : JSON.stringify(response),
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, messageId]);
-
-        } catch (error) {
-            console.error(`Error generating ${studentId}'s response:`, error);
-
-            // Define fallback responses based on student type
-            let fallbackText = '';
-            if (studentId === 'concept') {
-                fallbackText = "I think what the teacher is explaining makes sense for the calculation part. If we apply the formula step-by-step, we can solve this - though I'm not entirely sure why this specific approach works compared to other methods.";
-            } else {
-                fallbackText = "From a conceptual perspective, this problem is about understanding the constraints and how they affect the mathematical structure. The key insight is recognizing the pattern, though I might have made an arithmetic error somewhere in my calculations.";
-            }
-
-            // Replace typing indicator with fallback response
-            setMessages(prev => prev.map(msg =>
-                msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: fallbackText,
-                        timestamp: new Date().toISOString()
-                    }
-                    : msg
-            ));
-
-            // Add to typing state for typewriter effect
-            setTypingMessageIds(prev => [...prev, messageId]);
-        }
+        // Directly call generateSingleBotResponse without creating another message placeholder
+        generateSingleBotResponse(userQuestion, selectedAgent.id);
     };
 
     // Update the triggerAgentFeedback function to always use the tutor
@@ -1756,38 +1694,38 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
         }
     }, [hasSubmittedAnswer, isQuestioningEnabled]);
 
-    // Update handleTimeExpired to save session data and complete lesson
-    const handleTimeExpired = async () => {
-        if (hasSubmittedAnswer) return;
+    // Add a debugging function to verify message state
+    const debugMessages = () => {
+        console.log(`DEBUG: Current messages in state: ${messages.length}`);
+        console.log(`DEBUG: Current messages in ref: ${messageStateRef.current.length}`);
         
-        const now = new Date();
-        setSubmissionTime(now);
-        setHasSubmittedAnswer(true);
-        
-        // Save session data with timeout flag
-        await saveSessionData(finalAnswer || "No answer provided", true);
-        
-        // Complete the lesson
-        completeLesson();
+        // Log the last few messages
+        if (messageStateRef.current.length > 0) {
+            const lastMsg = messageStateRef.current[messageStateRef.current.length - 1];
+            console.log(`DEBUG: Last message - id: ${lastMsg.id}, sender: ${lastMsg.sender}, text preview: ${typeof lastMsg.text === 'string' ? lastMsg.text.substring(0, 30) : 'non-string'}...`);
+        }
     };
 
+    // Add this effect to verify messageStateRef is properly updated
+    useEffect(() => {
+        messageStateRef.current = messages;
+        console.log(`Message state sync: State has ${messages.length} messages, ref now has ${messageStateRef.current.length} messages`);
+    }, [messages]);
+
     return (
-        <div className="chat-page-container bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4">
+        <div className="chat-page-container bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-col h-full">
             {!hasSubmittedAnswer ? (
                 // Before submission view - full width layout
-                <div className="flex flex-col h-full w-full">
+                <div className="flex flex-col h-full">
                     {/* Problem Display with Timer */}
                     {currentQuestion && (
                         <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400 flex-shrink-0">
                             <div className="flex justify-between items-start mb-2">
                                 <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                                <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
-                                    Time: {formatTime(timeLeft)}
-                                </div>
                             </div>
-                            <p className="text-white text-lg">
+                            <div className="text-white text-lg mb-3">
                                 {formatMathExpression(getQuestionText(currentQuestion))}
-                            </p>
+                            </div>
                         </div>
                     )}
 
@@ -1795,43 +1733,59 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                     <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg flex-shrink-0">
                         <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
                         <div className="flex flex-col space-y-3">
-                            <input
-                                type="text"
-                                value={finalAnswer}
-                                onChange={(e) => setFinalAnswer(e.target.value)}
-                                placeholder="Enter your final answer here..."
-                                className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
-                            />
+                            {currentQuestion && currentQuestion.options && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+                                    {currentQuestion.options.map((option: string, index: number) => (
+                                        <div 
+                                            key={index}
+                                            onClick={() => setFinalAnswer(option)}
+                                            className={`cursor-pointer p-3 rounded-md border-2 ${
+                                                finalAnswer === option 
+                                                    ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
+                                                    : 'bg-white bg-opacity-10 border-gray-600'
+                                            }`}
+                                        >
+                                            <div className="flex items-center">
+                                                <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
+                                                    finalAnswer === option 
+                                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                                        : 'border-gray-400'
+                                                }`}>
+                                                    {finalAnswer === option && <span>✓</span>}
+                                                </div>
+                                                <div className="text-white">{formatMathExpression(option)}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                             <button
                                 onClick={() => handleSend()}
-                                // Only disable if truly empty - not based on typing status
-                                disabled={!finalAnswer.trim() || !scratchboardContent.trim()}
+                                disabled={!finalAnswer.trim() || !canSubmit}
                                 className={`px-4 py-3 rounded-md text-lg font-medium ${
-                                    finalAnswer.trim() && scratchboardContent.trim()
+                                    finalAnswer.trim() && canSubmit
                                         ? 'bg-blue-600 hover:bg-blue-700 text-white'
                                         : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                                 }`}
                             >
-                                Submit Final Answer
+                                {canSubmit ? 'Submit Final Answer' : `Wait ${Math.max(1, 10 - timeElapsed)}s...`}
                             </button>
                         </div>
                     </div>
 
-                    {/* Scratchboard - make this scrollable */}
+                    {/* Scratchboard - Always visible, read-only after submission */}
                     <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-hidden flex flex-col">
-                        <div className="flex justify-between mb-2 flex-shrink-0">
-                            <h3 className="text-white font-semibold">Rough Work (Scratchpad)</h3>
-                        </div>
                         <textarea
                             value={scratchboardContent}
                             onChange={(e) => setScratchboardContent(e.target.value)}
                             className="w-full flex-1 min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
-                            placeholder="Show your work here... (calculations, reasoning, etc.)"
+                            placeholder="Space for scratch work..."
+                            readOnly={hasSubmittedAnswer} // Make read-only after submission
                         />
                     </div>
                 </div>
             ) : (
-                <div className="flex h-full w-full">
+                <div className="flex h-full">
                     {/* Left panel - Problem Display */}
                     <div className="w-1/2 pr-2 flex flex-col h-full">
                         {/* Problem Display with Timer */}
@@ -1839,25 +1793,41 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                             <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400 flex-shrink-0">
                                 <div className="flex justify-between items-start mb-2">
                                     <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                                    <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                                    {hasSubmittedAnswer && <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
                                         Time: {formatTime(timeLeft)}
-                                    </div>
+                                    </div>}
                                 </div>
-                                <p className="text-white text-lg">
+                                <div className="text-white text-lg mb-3">
                                     {formatMathExpression(getQuestionText(currentQuestion))}
-                                </p>
+                                </div>
+                                
+                                {/* Multiple Choice Options Display */}
+                                {currentQuestion.options && currentQuestion.options.length > 0}
                             </div>
                         )}
 
                         {/* Student Answer & Work Area (read-only after submission) */}
                         <div className="bg-white bg-opacity-15 p-4 rounded-md mb-4 border-2 border-blue-400 flex-shrink-0">
-                            <h3 className="text-lg text-white font-semibold mb-2">Your Answer & Work</h3>
-                            <div className="bg-black bg-opacity-30 p-3 rounded-md mb-3">
-                                <p className="text-white"><strong>Your Answer:</strong> {finalAnswer}</p>
+                            <h3 className="text-lg text-white font-semibold mb-2">Your Final Answer</h3>
+                            <div className="p-3 rounded-md border-2 bg-blue-500 bg-opacity-30 border-blue-500">
+                                <div className="flex items-center">
+                                    <div className="w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center border-blue-500 bg-blue-500 text-white">
+                                        <span>✓</span>
+                                    </div>
+                                    <div className="text-white">{formatMathExpression(finalAnswer)}</div>
+                                </div>
                             </div>
-                            <div className="bg-black bg-opacity-30 p-3 rounded-md overflow-auto max-h-[300px]">
-                                <p className="text-white whitespace-pre-wrap"><strong>Your Work:</strong> {scratchboardContent}</p>
-                            </div>
+                        </div>
+
+                        {/* Scratchboard - Always visible, read-only after submission */}
+                        <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-hidden flex flex-col">
+                            <textarea
+                                value={scratchboardContent}
+                                onChange={(e) => setScratchboardContent(e.target.value)}
+                                className="w-full flex-1 min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
+                                placeholder="Space for scratch work..."
+                                readOnly={hasSubmittedAnswer} // Make read-only after submission
+                            />
                         </div>
                     </div>
 

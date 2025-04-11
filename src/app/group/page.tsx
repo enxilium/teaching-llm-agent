@@ -93,8 +93,10 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
    - Use $\\frac{1}{2}$ instead of 1/2
    - Use $\\sqrt{x}$ instead of √x
    - Use $\\times$ instead of × or x
-4. Never use double $$ delimiters
-5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
+5. Never use double $$ delimiters
+6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
 
 IMPORTANT: Don't correct your own conceptual misunderstandings unless someone else points them out first. You believe your approach is correct until proven otherwise.`
     },
@@ -133,8 +135,10 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
    - Use $\\frac{1}{2}$ instead of 1/2
    - Use $\\sqrt{x}$ instead of √x
    - Use $\\times$ instead of × or x
-4. Never use double $$ delimiters
-5. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
+5. Never use double $$ delimiters
+6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
+7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
 
 IMPORTANT: Don't correct your own calculation errors unless someone else points them out first. You believe your numerical answers are correct until proven otherwise.`
     }
@@ -142,8 +146,9 @@ IMPORTANT: Don't correct your own calculation errors unless someone else points 
 
 export default function PeerOnlyPage() {
     const router = useRouter();
-    const { currentStage, completeLesson, userId, saveSessionData: saveToFlowContext } = useFlow();
+    const { currentStage, completeLesson, userId, saveSessionData: saveToFlowContext, lessonQuestionIndex, lessonType } = useFlow();
     const [sessionStartTime] = useState<Date>(new Date());
+    const [submissionTime, setSubmissionTime] = useState<Date | null>(null);
 
     // State management
     const [messages, setMessages] = useState<Message[]>([]);
@@ -162,17 +167,19 @@ export default function PeerOnlyPage() {
     const [currentModel] = useState(AI_MODELS.GPT4O.id);
     const [lastUserActivityTime, setLastUserActivityTime] = useState(Date.now());
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
+    // Add canSubmit state variable - starts as false until timer reaches 10 seconds
+    const [canSubmit, setCanSubmit] = useState(false);
 
     // Questions from JSON
     const [allQuestions, setAllQuestions] = useState<Question[]>([]);
     const [loadedQuestions, setLoadedQuestions] = useState(false);
 
-    // Timer state
-    const [timeLeft, setTimeLeft] = useState(120);
+    // Timer state - Use timeElapsed for pre-submission, timeLeft for post-submission
+    const [timeElapsed, setTimeElapsed] = useState(0); // Time counting up before submission
+    const [timeLeft, setTimeLeft] = useState(90);    // Time counting down after submission
     const roundEndedRef = useRef(false);
 
     // Question tracking
-    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [usedQuestionIndices, setUsedQuestionIndices] = useState<number[]>([]);
     const [currentQuestion, setCurrentQuestion] = useState<string | Question>("");
 
@@ -189,6 +196,25 @@ export default function PeerOnlyPage() {
 
     // Add to component state in all pages
     const [skipTypewriter, setSkipTypewriter] = useState(false);
+
+    // Add a messageStateRef to track message state outside of React rendering
+    const messageStateRef = useRef<Message[]>([]);
+
+    // Update the setMessages calls to also update our ref
+    const updateMessages = (newMessages: Message[] | ((prev: Message[]) => Message[])) => {
+        // First apply the update to the state
+        setMessages(prev => {
+            const nextMessages = typeof newMessages === 'function' 
+                ? newMessages(prev) 
+                : newMessages;
+            
+            // Then update our ref
+            messageStateRef.current = nextMessages;
+            
+            // Return for the actual state update
+            return nextMessages;
+        });
+    };
 
     const getQuestionText = (question: any): string => {
         if (typeof question === 'string') return question;
@@ -214,71 +240,77 @@ export default function PeerOnlyPage() {
 
     // Add a function to check answer correctness
     const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
-        if (!question || !question.correctAnswer) return false;
-
-        // Simple string comparison (enhance as needed)
+        if (!question) return false;
+        
+        // Check for correctAnswer first, then fall back to answer
+        const correctAnswer = question.correctAnswer || question.answer;
+        if (!correctAnswer) return false;
+        
+        // Simple string comparison for multiple choice options
         const normalizedUserAnswer = userAnswer.trim().toLowerCase();
-        const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
-
+        const normalizedCorrectAnswer = correctAnswer.trim().toLowerCase();
+        
         return normalizedUserAnswer === normalizedCorrectAnswer;
     };
 
-    // Update saveSessionData to use the flow context instead of SessionService
+    // Update saveSessionData to use the messageStateRef
     const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
         try {
-            // Calculate session duration in seconds
-            const endTime = new Date();
-            const durationMs = endTime.getTime() - sessionStartTime.getTime();
-            const durationSeconds = Math.floor(durationMs / 1000);
-
+            // UPDATED: Use messageStateRef instead of messages state
+            const currentMessages = messageStateRef.current;
+            
+            // ADDED: Directly log the current message state at function start
+            console.log(`💾 GROUP [Session Save] Current messages from ref: ${currentMessages.length} messages`);
+            
+            // If messages is empty, log a warning
+            if (currentMessages.length === 0) {
+                console.warn(`⚠️ GROUP [Session Save] WARNING: messages array is empty at saveSessionData call!`);
+            }
+            
+            // Calculate duration using submission time
+            if (!submissionTime) {
+                console.warn('No submission time recorded, using current time');
+            }
+            const submissionMs = (submissionTime || new Date()).getTime() - sessionStartTime.getTime();
+            const durationSeconds = Math.floor(submissionMs / 1000);
+            
             // Get the question text
-            const questionText = getQuestionText(currentQuestion);
-
+            const questionText = typeof currentQuestion === 'object' && currentQuestion?.question 
+                ? currentQuestion.question 
+                : (typeof currentQuestion === 'string' ? currentQuestion : '');
+            
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            // CRITICAL - Add detailed message logging
-            console.log(`💾 GROUP [Session Save] Original messages count: ${messages.length}`);
-            if (messages.length > 0) {
-                console.log(`💾 GROUP [Message Sample] First message fields: ${Object.keys(messages[0]).join(', ')}`);
-                console.log(`💾 GROUP [Message Sample] First message text: ${typeof messages[0].text === 'string' ? 
-                    messages[0].text.substring(0, 50) + '...' : 'non-string content'}`);
-                console.log(`💾 GROUP [First Message] ${JSON.stringify(messages[0]).substring(0, 100)}...`);
-                console.log(`💾 GROUP [Last Message] ${JSON.stringify(messages[messages.length-1]).substring(0, 100)}...`);
-            } else {
-                console.warn("⚠️ GROUP No messages to save!");
+            // Log BEFORE using prepareMessagesForStorage
+            console.log(`⚠️ GROUP [Session Save] Raw messages before processing: ${currentMessages.length}`);
+            
+            if (currentMessages.length > 0) {
+                const sampleMessage = currentMessages[0];
+                console.log(`⚠️ GROUP [Session Save] Sample raw message: ID: ${sampleMessage.id}, Sender: ${sampleMessage.sender}, AgentId: ${sampleMessage.agentId || 'none'}, Text: ${typeof sampleMessage.text === 'string' ? (sampleMessage.text.length > 50 ? sampleMessage.text.substring(0, 50) + '...' : sampleMessage.text) : 'non-string content'}`);
             }
             
-            // Clean messages for database storage
-            const cleanedMessages = prepareMessagesForStorage(messages);
-            console.log(`💾 GROUP [After Cleaning] ${cleanedMessages.length} messages remain`);
+            // Use prepareMessagesForStorage to properly format messages
+            const cleanedMessages = prepareMessagesForStorage(currentMessages);
             
-            // Add additional message verification
-            const messagesWithoutProperties = cleanedMessages.filter(msg => 
-                !msg.id || !msg.sender || !msg.text || !msg.timestamp
-            );
-            
-            if (messagesWithoutProperties.length > 0) {
-                console.warn(`⚠️ GROUP Found ${messagesWithoutProperties.length} messages with missing properties`);
-            }
-
-            // Instead of calling SessionService, save to flow context
+            // Save to flow context
             saveToFlowContext({
-                questionId: currentQuestionIndex,
+                questionId: lessonQuestionIndex,
                 questionText,
                 startTime: sessionStartTime,
-                endTime,
+                endTime: submissionTime || new Date(),
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
                 scratchboardContent,
                 messages: cleanedMessages,
                 isCorrect,
-                timeoutOccurred: isTimeout
-            });
-
-            console.log(`✅ GROUP Session data saved to flow context successfully with ${cleanedMessages.length} messages`);
+                timeoutOccurred: false, // Always false since we don't have timeouts
+                lessonType // Include lessonType in the saved data
+            } as any);
+            
+            console.log(`✅ GROUP [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
         } catch (error) {
-            console.error('❌ GROUP Error saving session data:', error);
+            console.error(`❌ GROUP [Session Save] Error saving session data:`, error);
         }
     };
 
@@ -293,38 +325,31 @@ export default function PeerOnlyPage() {
                 
                 const data = await response.json();
                 
-                // Flatten all categories into a single array of questions
-                const questions: Question[] = Object.values(data).flat() as Question[];
+                // Flatten all categories into a single array of questions if needed
+                const questions: any[] = data.questions || [];
                 
                 setAllQuestions(questions);
                 setLoadedQuestions(true);
-                console.log("Loaded questions:", questions);
+                
+                // Set the current question using lessonQuestionIndex
+                if (typeof lessonQuestionIndex === 'number' && 
+                    lessonQuestionIndex >= 0 && 
+                    lessonQuestionIndex < questions.length) {
+                    console.log(`Using predetermined lessonQuestionIndex: ${lessonQuestionIndex}`);
+                    setCurrentQuestion(questions[lessonQuestionIndex]);
+                } else {
+                    console.warn(`Invalid lessonQuestionIndex: ${lessonQuestionIndex}, using default question`);
+                    setCurrentQuestion(questions[0]); 
+                }
             } catch (error) {
                 console.error("Error loading questions:", error);
-                // Use fallback questions if we can't load from JSON
-                setAllQuestions([
-                    {
-                        id: 1,
-                        question: "In how many ways can four couples be seated at a round table if the men and women want to sit alternately?",
-                        answer: "144"
-                    },
-                    {
-                        id: 2,
-                        question: "In how many different ways can five people be seated at a circular table?",
-                        answer: "24"
-                    },
-                    {
-                        id: 3,
-                        question: "A shopping mall has a straight row of 5 flagpoles at its main entrance plaza. It has 3 identical green flags and 2 identical yellow flags. How many distinct arrangements of flags on the flagpoles are possible?",
-                        answer: "10"
-                    }
-                ]);
+                // Use fallback question if needed
                 setLoadedQuestions(true);
             }
         };
         
         fetchQuestions();
-    }, []);
+    }, [lessonQuestionIndex]);
 
     // Add this flow stage check effect after your other state declarations
     useEffect(() => {
@@ -553,10 +578,13 @@ export default function PeerOnlyPage() {
         }
     };
 
-    // Update the handleSend function to stop the timer when submitting
-
+    // Update handleSend to NOT save session data
     const handleSend = () => {
-        if (!finalAnswer.trim() || !scratchboardContent.trim() || typingMessageIds.length > 0) return;
+        if (!finalAnswer.trim() || typingMessageIds.length > 0) return;
+
+        // Record submission time
+        const now = new Date();
+        setSubmissionTime(now);
 
         // Record user activity
         setLastUserActivityTime(Date.now());
@@ -565,19 +593,16 @@ export default function PeerOnlyPage() {
             const userFinalAnswer: Message = {
                 id: getUniqueMessageId(),
                 sender: 'user',
-                text: `My final answer is: ${finalAnswer}\n\nMy reasoning:\n${scratchboardContent}`,
+                text: `My final answer is: ${finalAnswer}\n\nMy reasoning:\n${scratchboardContent || "No work shown"}`,
                 timestamp: new Date().toISOString()
             };
 
-            setMessages([userFinalAnswer]);
+            updateMessages([userFinalAnswer]);
             setHasSubmittedAnswer(true);
             
             // Stop the timer when chat interface appears
             roundEndedRef.current = true;
 
-            // Do NOT save session data here - wait until the discussion is complete
-            // This prevents duplicate session data submission
-            
             // Start bot discussion after submission
             const savedMessages = [userFinalAnswer]; // Track initial messages
             setIsQuestioningEnabled(true);
@@ -586,17 +611,17 @@ export default function PeerOnlyPage() {
             lastTypingUpdateRef.current = Date.now();
             setTypingMessageIds([]);
             
-            startBotDiscussion(currentQuestion, finalAnswer, scratchboardContent);
+            startBotDiscussion(currentQuestion, finalAnswer, scratchboardContent || "No work shown");
         });
     };
 
-    // Modify startBotDiscussion to remove the word count reset
+    // Modify startBotDiscussion to reset the countdown timer for discussion
     const startBotDiscussion = (question: any, studentAnswer: string, scratchpad: string) => {
         // Reset discussion timer to 2 minutes when discussion starts
-        setTimeLeft(120);
+        setTimeLeft(90);
         roundEndedRef.current = false;
-      
-        // First add the user's answer as the initial message
+        
+        // Create the user answer message
         const userAnswerMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
@@ -612,7 +637,7 @@ export default function PeerOnlyPage() {
         const firstBot = agents.find(a => a.id === speakingOrder[0])!;
         
         // Set messages with user answer first, then first bot
-        setMessages([
+        updateMessages([
             userAnswerMessage,
             {
                 id: firstBotId,
@@ -671,7 +696,7 @@ export default function PeerOnlyPage() {
         const secondBot = agents.find(a => a.id === botId)!;
         
         // Now add the second bot's message
-        setMessages(prev => [
+        updateMessages(prev => [
             ...prev,
             {
                 id: secondBotId,
@@ -704,32 +729,58 @@ export default function PeerOnlyPage() {
             const questionText = getQuestionText(question);
             const correctAnswer = typeof question === 'object' && question.correctAnswer 
                 ? question.correctAnswer 
-                : null;
+                : (typeof question === 'object' && question.answer
+                    ? question.answer
+                    : 'not provided');
             
+            // Get multiple choice options if available
+            const options = typeof question === 'object' && question.options 
+                ? question.options 
+                : [];
+            
+            const isMultipleChoice = Array.isArray(options) || (options && Object.keys(options).length > 0);
+
             // Build prompt for peer's initial response
             let promptText = `The current problem is: ${questionText}\n\n`;
-            
+
+            if (isMultipleChoice) {
+                promptText += `This is a multiple choice problem with the following options:\n`;
+                
+                // Handle both array options and object options
+                if (Array.isArray(options)) {
+                    options.forEach((option, index) => {
+                        promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
+                    });
+                } else if (typeof options === 'object') {
+                    Object.entries(options).forEach(([key, value]) => {
+                        promptText += `${key}. ${value}\n`;
+                    });
+                }
+                promptText += `\n`;
+            }
+
+            // Include the correct answer for the AI's knowledge
             if (correctAnswer) {
                 promptText += `The correct answer is: ${correctAnswer}\n\n`;
             }
             
-            promptText += `As ${agent.name}, provide your answer to this problem in this format:
-1. Start with "My answer is [your answer]."
-2. Then explain your reasoning process with "This is how I solved it..."
-3. Show your work and calculations
+            promptText += `As ${agent.name}, respond to this ${isMultipleChoice ? 'multiple choice ' : ''}problem in this format:
+1. If it's multiple choice, start with "I choose option [letter/answer]."
+2. Otherwise, start with "My answer is [your answer]."
+3. Then explain your reasoning process showing your work
 4. Make sure your response maintains your character's traits (calculation skills but conceptual confusion OR conceptual understanding but arithmetic errors)`;
-            
+
             // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
                     systemPrompt: agent.systemPrompt,
-                    model: 'gpt-4o-2024-08-06'
+                    model: currentModel
                 }
             );
-            
-            // Update message with response
-            setMessages(prev => prev.map(msg =>
+
+            // Replace typing indicator with actual response
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -738,23 +789,19 @@ export default function PeerOnlyPage() {
                     }
                     : msg
             ));
-            
-            // ADD THIS LINE: Add message to typingMessageIds to trigger animation
-            addTypingMessageId(messageId);
-            
+
+            // Add message to typingMessageIds
+            setTypingMessageIds(prev => [...prev, messageId]);
+
         } catch (error) {
-            console.error(`Error generating ${agent.name}'s initial response:`, error);
+            console.error(`Error generating ${agent.id}'s response:`, error);
             
-            // Fallback response
-            let fallbackText = '';
+            // Provide a fallback response if there's an error
+            const fallbackText = agent.id === 'concept'
+                ? "I choose option B. This is how I solved it: I follow the steps carefully and make sure to calculate each part correctly, though I'm not fully clear on why this specific approach is best."
+                : "I choose option A. This is how I solved it: Looking at the conceptual framework, I identified the key relationship, though I might have made a small calculation error somewhere.";
             
-            if (agent.id === 'concept') {
-                fallbackText = "I think I understand the problem. Looking at the steps, I'll solve it like this...";
-            } else if (agent.id === 'arithmetic') {
-                fallbackText = "I think I see what this problem is asking for. The key concept is...";
-            }
-            
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -763,9 +810,9 @@ export default function PeerOnlyPage() {
                     }
                     : msg
             ));
-            
-            // ALSO ADD HERE: Add message to typingMessageIds in error case too
-            addTypingMessageId(messageId);
+
+            // Add message to typingMessageIds in error case too
+            setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
 
@@ -813,7 +860,7 @@ export default function PeerOnlyPage() {
         };
 
         // Add user message with logging
-        setMessages(prev => {
+        updateMessages(prev => {
             const newMessages = [...prev, userMessage];
             console.log(`📝 GROUP [Message Added] User message. Total: ${newMessages.length}`);
             return newMessages;
@@ -857,7 +904,7 @@ export default function PeerOnlyPage() {
             const firstResponderMsgId = getUniqueMessageId();
             
             // Add typing indicator for first bot with logging
-            setMessages(prev => {
+            updateMessages(prev => {
                 const newMessages = [...prev, {
                     id: firstResponderMsgId,
                     sender: 'ai',
@@ -1009,7 +1056,7 @@ export default function PeerOnlyPage() {
             );
             
             // Update message with response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -1034,7 +1081,7 @@ export default function PeerOnlyPage() {
                 fallbackText = "That's an interesting question. From a conceptual standpoint...";
             }
             
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -1062,12 +1109,15 @@ export default function PeerOnlyPage() {
         const messageId = getUniqueMessageId();
         
         // Add typing indicator
-        setMessages(prev => [...prev, {
+        updateMessages(prev => [...prev, {
             id: messageId,
             sender: 'ai',
             text: '...',
             agentId: agent.id,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            onComplete: () => {
+                console.log(`📝 GROUP [Message Completed] ${agent.name} direct response complete`);
+            }
         }]);
         
         // Generate response
@@ -1099,13 +1149,18 @@ export default function PeerOnlyPage() {
             setTimeout(() => {
                 interventionRef.current = false;
                 setLastMessageTime(Date.now()); // Reset the timer after intervention
-            }, 100);
+                
+                // ADDED: Save session data after intervention completes
+                console.log(`💾 GROUP [Message Save] Saving after ${type} intervention by ${randomBot.name}`);
+                const userAnswerText = finalAnswer.trim() || "No answer provided";
+                saveSessionData(userAnswerText, false);
+            }, 500);
         };
         
         // Add to typing IDs FIRST before adding message
         addTypingMessageId(botId);
         
-        setMessages(prev => [
+        updateMessages(prev => [
             ...prev,
             {
                 id: botId,
@@ -1184,7 +1239,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
             );
             
             // Update message with response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? { ...msg, text: response, timestamp: new Date().toISOString() }
                     : msg
@@ -1242,7 +1297,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
             );
             
             // Update message with response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? { ...msg, text: response, timestamp: new Date().toISOString() }
                     : msg
@@ -1259,7 +1314,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                 fallbackText = "I was thinking about the underlying concept in this problem. What if we look at it from this angle...";
             }
             
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? { ...msg, text: fallbackText, timestamp: new Date().toISOString() }
                     : msg
@@ -1277,7 +1332,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
             fallbackText = "I was considering the underlying concept here. What if we consider it from this angle...";
         }
         
-        setMessages(prev => prev.map(msg =>
+        updateMessages(prev => prev.map(msg =>
             msg.id === messageId
                 ? { ...msg, text: fallbackText, timestamp: new Date().toISOString() }
                 : msg
@@ -1350,7 +1405,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
             console.log(`${bot.name}'s intervention complete, triggering next bot if available`);
             setTimeout(() => {
                 triggerNextBotInSequence(type, messageId);
-            }, 1500); // Add delay between bot responses
+            }, 1500);
         };
         
         // IMPORTANT - Add this ID to typing messages BEFORE creating the message
@@ -1360,7 +1415,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         
         // Add the message placeholder
         console.log(`SEQUENCE DEBUG: Creating placeholder message with ID ${messageId}`);
-        setMessages(prev => [
+        updateMessages(prev => [
             ...prev,
             {
                 id: messageId,
@@ -1386,7 +1441,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
 
     const startNewRound = () => {
         // Reset the conversation state
-        setMessages([]);
+        updateMessages([]);
         setCompletedMessageIds([]);
         setTypingMessageIds([]);
         setScratchboardContent("");
@@ -1395,11 +1450,11 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         setIsQuestioningEnabled(true);
         
         // Reset timer
-        setTimeLeft(120);
+        setTimeLeft(90);
         roundEndedRef.current = false;
         
         // Select a question (either use lesson index or pick randomly)
-        let questionIndex = currentQuestionIndex;
+        let questionIndex = lessonQuestionIndex;
         
         // If we've already used this question, try to find a random unused one
         if (usedQuestionIndices.includes(questionIndex) && usedQuestionIndices.length < allQuestions.length) {
@@ -1417,7 +1472,6 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         }
         
         // Update state with the selected question
-        setCurrentQuestionIndex(questionIndex);
         setCurrentQuestion(allQuestions[questionIndex]);
         setUsedQuestionIndices(prev => [...prev, questionIndex]);
         
@@ -1435,77 +1489,15 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         }
     }, [loadedQuestions]);
 
-    // Timer functionality
+    // Update timer effect to save session data only at the end
     useEffect(() => {
-        // Only run timer if question is loaded
         if (!currentQuestion) return;
 
-        // Handle different timer behaviors based on submission state
-        if (!hasSubmittedAnswer) {
-            // Pre-submission timer logic
+        if (hasSubmittedAnswer) {
+            // Post-submission phase - Use decreasing timer (countdown)
             if (timeLeft <= 0) {
-                // Time's up logic
-                console.log('Time expired - auto-submitting current answer');
-                // Handle timeout submission logic
-                const submissionText = finalAnswer.trim() || "No answer provided";
-                setHasSubmittedAnswer(true);
-
-                // Add system message
-                const timeUpMessageId = getUniqueMessageId();
-                setMessages(prev => [
-                    ...prev,
-                    {
-                        id: timeUpMessageId,
-                        sender: 'system',
-                        text: "Time's up! Moving to the next question...",
-                        timestamp: new Date().toISOString()
-                    }
-                ]);
-
-                // Mark as ended and disable interaction
-                roundEndedRef.current = true;
-                setIsQuestioningEnabled(false);
-
-                // CRITICAL: First save with updated messages
-                setTimeout(() => {
-                    console.log(`💬 Saving final session with ${messages.length} messages`);
-                    saveSessionData(submissionText, true);
-
-                    // Then navigate
-                    setTimeout(() => {
-                        startBotDiscussion(currentQuestion, submissionText, scratchboardContent);
-                    }, 1000);
-                }, 2000);
-
-                return;
-            }
-
-            if (roundEndedRef.current) {
-                return;
-            }
-
-            const timerId = setTimeout(() => {
-                setTimeLeft((prevTime) => prevTime - 1);
-            }, 1000);
-
-            return () => clearTimeout(timerId);
-        } else {
-            // Post-submission discussion timer logic
-            if (timeLeft <= 0) {
-                // Discussion time is up, navigate to next page
+                // Discussion phase timeout - navigate to next page
                 console.log('Discussion time expired - navigating to next page');
-                
-                // Show a message that time is up
-                const timeUpMessageId = getUniqueMessageId();
-                setMessages(prev => [
-                    ...prev,
-                    {
-                        id: timeUpMessageId,
-                        sender: 'system',
-                        text: "Time's up! Moving to the next question...",
-                        timestamp: new Date().toISOString()
-                    }
-                ]);
                 
                 // IMPORTANT FIX: Mark the round as ended to prevent further timer decrements
                 roundEndedRef.current = true;
@@ -1513,12 +1505,48 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                 // Disable user interaction during transition
                 setIsQuestioningEnabled(false);
                 
-                // Save session data before navigating
+                // Add message about moving on
+                const timeUpMessageId = getUniqueMessageId();
+                updateMessages(prev => [
+                    ...prev,
+                    {
+                        id: timeUpMessageId,
+                        sender: 'system',
+                        text: "Time's up! Moving to the next question...",
+                        timestamp: new Date().toISOString()
+                    }
+                ]);
+                
+                // Save final session data with complete message history
                 setTimeout(() => {
-                    console.log(`💬 GROUP Saving final session with ${messages.length + 1} messages`);
-                    saveSessionData(finalAnswer, false);
+                    console.log(`💾 GROUP [Final Save] Saving complete conversation before navigation`);
                     
-                    // Then navigate after data is saved
+                    // Get the current messages directly from messageStateRef
+                    const currentMsgCount = messageStateRef.current.length;
+                    console.log(`💾 GROUP [Final Save] Message count from ref: ${currentMsgCount}`);
+                    
+                    if (currentMsgCount === 0) {
+                        console.warn(`⚠️ GROUP [Final Save] WARNING: messageStateRef is empty at final save!`);
+                        
+                        // Log the actual messages state
+                        console.log(`⚠️ GROUP [Final Save] Current messages from state: ${messages.length}`);
+                        
+                        // Force update messageStateRef if it's empty but messages has content
+                        if (messages.length > 0) {
+                            messageStateRef.current = [...messages];
+                            console.log(`⚠️ GROUP [Final Save] Forced messageStateRef update with ${messageStateRef.current.length} messages`);
+                        }
+                    }
+                    
+                    // Save the FINAL state of the conversation, including:
+                    // - Initial submission time (from submissionTime state)
+                    // - Final answer and scratchboard content
+                    // - Complete message history
+                    // - Total duration from submission to end
+                    const userAnswerText = finalAnswer.trim() || "No answer provided";
+                    saveSessionData(userAnswerText, false);
+                    
+                    // Then navigate
                     setTimeout(() => {
                         completeLesson();
                     }, 1000);
@@ -1527,13 +1555,25 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                 return;
             }
 
+            // Continue with normal countdown timer logic
+            if (roundEndedRef.current) return;
+
             const timerId = setTimeout(() => {
                 setTimeLeft((prevTime) => prevTime - 1);
             }, 1000);
 
             return () => clearTimeout(timerId);
+        } else {
+            // Pre-submission timer logic (count up)
+            if (roundEndedRef.current) return;
+
+            const timerId = setTimeout(() => {
+                setTimeElapsed((prevTime) => prevTime + 1);
+            }, 1000);
+
+            return () => clearTimeout(timerId);
         }
-    }, [timeLeft, hasSubmittedAnswer, currentQuestion]);
+    }, [timeLeft, timeElapsed, hasSubmittedAnswer, currentQuestion]);
 
     // Add this effect to periodically check and clear stale typing IDs
     useEffect(() => {
@@ -1579,6 +1619,18 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         }
     }, [messages]);
 
+    // Add a useEffect to enable the submit button after 10 seconds
+    useEffect(() => {
+        // Only check pre-submission timer
+        if (hasSubmittedAnswer) return;
+        
+        // When timeElapsed hits 10 seconds, make sure the button can be enabled
+        if (timeElapsed >= 10 && !canSubmit) {
+            console.log("Timer reached 10 seconds, enabling submit button");
+            setCanSubmit(true);
+        }
+    }, [timeElapsed, hasSubmittedAnswer, canSubmit]);
+
     return (
         <div className="fixed inset-0 bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden">
             {/* LEFT PANEL - Problem, Submission, Scratchboard */}
@@ -1588,9 +1640,9 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                     <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
                         <div className="flex justify-between items-start mb-2">
                             <h2 className="text-xl text-white font-semibold">Problem:</h2>
-                            <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                            {hasSubmittedAnswer && <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
                                 Time: {formatTime(timeLeft)}
-                            </div>
+                            </div>}
                         </div>
                         <p className="text-white text-lg">
                             {formatMathExpression(typeof currentQuestion === 'string' ? currentQuestion : 
@@ -1600,44 +1652,113 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                     </div>
                 )}
                 
-                {/* Final Answer - Now above scratchboard with enhanced styling */}
-                <div className="bg-white bg-opacity-15 rounded-md p-4 mb-4 border-2 border-blue-400 shadow-lg">
-                    <h3 className="text-xl text-white font-semibold mb-2">Your Final Answer</h3>
-                    <div className="flex flex-col space-y-3">
+                {/* Final Answer Input Section */}
+                <div className="bg-white bg-opacity-15 p-4 rounded-md mb-4 border border-blue-500 flex-shrink-0">
+                    <h3 className="text-lg text-white font-semibold mb-2">Your Final Answer</h3>
+                    
+                    {/* Multiple Choice Options - show when question has options */}
+                    {currentQuestion && typeof currentQuestion === 'object' && currentQuestion.options && (
+                        <div className="grid grid-cols-1 gap-2 mb-3">
+                            {!hasSubmittedAnswer ? (
+                                // Show all options before submission
+                                Array.isArray(currentQuestion.options) ? (
+                                    // Handle array-style options
+                                    currentQuestion.options.map((option, index) => (
+                                        <div 
+                                            key={index}
+                                            onClick={() => setFinalAnswer(option)}
+                                            className={`cursor-pointer p-3 rounded-md border-2 ${
+                                                finalAnswer === option 
+                                                    ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
+                                                    : 'bg-white bg-opacity-10 border-gray-600'
+                                            }`}
+                                        >
+                                            <div className="flex items-center">
+                                                <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
+                                                    finalAnswer === option 
+                                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                                        : 'border-gray-400'
+                                                }`}>
+                                                    {finalAnswer === option && <span>✓</span>}
+                                                </div>
+                                                <div className="text-white">{formatMathExpression(option)}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    // Handle object-style options
+                                    Object.entries(currentQuestion.options).map(([key, value]) => (
+                                        <div 
+                                            key={key}
+                                            onClick={() => setFinalAnswer(value as string)}
+                                            className={`cursor-pointer p-3 rounded-md border-2 ${
+                                                finalAnswer === value 
+                                                    ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
+                                                    : 'bg-white bg-opacity-10 border-gray-600'
+                                            }`}
+                                        >
+                                            <div className="flex items-center">
+                                                <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
+                                                    finalAnswer === value 
+                                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                                        : 'border-gray-400'
+                                                }`}>
+                                                    {finalAnswer === value && <span>✓</span>}
+                                                </div>
+                                                <div className="text-white">{formatMathExpression(value as string)}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )
+                            ) : (
+                                // After submission, show only the selected answer in a read-only format
+                                <div className="p-3 rounded-md border-2 bg-blue-500 bg-opacity-30 border-blue-500">
+                                    <div className="flex items-center">
+                                        <div className="w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center border-blue-500 bg-blue-500 text-white">
+                                            <span>✓</span>
+                                        </div>
+                                        <div className="text-white">{formatMathExpression(finalAnswer)}</div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    
+                    {/* Text Input - show only when no options are available */}
+                    {(!currentQuestion || typeof currentQuestion !== 'object' || !currentQuestion.options) && (
                         <input
                             type="text"
                             value={finalAnswer}
                             onChange={(e) => setFinalAnswer(e.target.value)}
                             placeholder="Enter your final answer here..."
-                            className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-3 text-lg"
-                            readOnly={hasSubmittedAnswer} // Make read-only after submission
+                            className="w-full bg-white bg-opacity-10 text-white border border-gray-600 rounded-md px-3 py-2"
+                            disabled={hasSubmittedAnswer}
                         />
-                        {!hasSubmittedAnswer && (
-                            <button
-                                onClick={handleSend}
-                                disabled={!finalAnswer.trim() || !scratchboardContent.trim() || typingMessageIds.length > 0}
-                                className={`px-4 py-3 rounded-md text-lg font-medium ${
-                                    finalAnswer.trim() && scratchboardContent.trim() && typingMessageIds.length === 0
-                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                }`}
-                            >
-                                Submit Final Answer
-                            </button>
-                        )}
-                    </div>
+                    )}
+                    
+                    {!hasSubmittedAnswer && <button
+                        onClick={() => handleSend()}
+                        disabled={!finalAnswer.trim() || !canSubmit}
+                        className={`w-full mt-2 px-4 py-2 rounded-md font-medium ${
+                            finalAnswer.trim() && canSubmit
+                                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                        }`}
+                    >
+                        {canSubmit 
+                            ? 'Submit Final Answer' 
+                            : `Wait ${Math.max(1, 10 - timeElapsed)}s...`
+                        }
+                    </button>}
                 </div>
                 
                 {/* Scratchboard - Now below final answer with different styling */}
                 <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
-                    <div className="flex justify-between mb-2">
-                        <h3 className="text-white font-semibold">Rough Work (Required)</h3>
-                    </div>
                     <textarea
                         value={scratchboardContent}
                         onChange={(e) => setScratchboardContent(e.target.value)}
                         className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
-                        placeholder="Show your work here... (required for submission)"
+                        placeholder="Space for scratch work..."
                         readOnly={hasSubmittedAnswer} // Make read-only after submission
                     />
                 </div>
@@ -1724,6 +1845,16 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                                                         console.log(`TypewriterTextWrapper complete: removed ID ${msg.id}, ${prev.length} -> ${filtered.length}`);
                                                         return filtered;
                                                     });
+                                                    
+                                                    // CRITICAL FIX: Update messageStateRef when typing completes
+                                                    // This ensures messageStateRef has the latest message content
+                                                    const updatedMessages = messages.map(message => 
+                                                        message.id === msg.id 
+                                                        ? { ...message } // Create a new reference for this message
+                                                        : message
+                                                    );
+                                                    messageStateRef.current = updatedMessages;
+                                                    console.log(`Updated messageStateRef after typing completion, now has ${messageStateRef.current.length} messages`);
                                                     
                                                     // Force scroll to bottom when typing completes
                                                     setTimeout(() => scrollToBottom(true), 50);

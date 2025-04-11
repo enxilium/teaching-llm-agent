@@ -20,6 +20,7 @@ export interface SessionDocument extends Document {
   isCorrect: boolean;
   timeoutOccurred: boolean;
   tempRecord: boolean;
+  lessonType: string;
   surveyData?: {
     confusionLevel?: string;
     testDifficulty?: string;
@@ -99,6 +100,11 @@ const SessionSchema = new Schema(
       type: Boolean,
       default: false, // Always false - all records are permanent
       index: true
+    },
+    lessonType: {
+      type: String,
+      required: false,
+      default: null
     },
     surveyData: {
       type: SurveyDataSchema,
