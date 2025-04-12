@@ -342,8 +342,8 @@ export default function SoloPage() {
     // If questions haven't loaded yet
     if (isLoading) {
         return (
-            <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] flex justify-center items-center">
-                <div className="text-white text-xl">Loading question...</div>
+            <div className="flex flex-col h-screen justify-center items-center bg-gradient-to-b from-[#2D0278] to-[#0A001D] text-white">
+                <div className="text-2xl">Loading question...</div>
             </div>
         );
     }
@@ -355,55 +355,49 @@ export default function SoloPage() {
     }
     
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D]">
-            <div className="container mx-auto p-8">
-                {/* Header */}
-                <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <h1 className="text-3xl text-white font-bold mb-2">Self-Study Question</h1>
-                            <p className="text-white opacity-70">
-                                Work through this problem and enter your answer.
-                            </p>
+        <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-col overflow-hidden">
+            <div className="w-full flex flex-col h-full overflow-hidden">
+                {/* Problem Display with Timer */}
+                {currentQuestion && (
+                    <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
+                        <div className="flex justify-between items-start mb-2">
+                            <h2 className="text-xl text-white font-semibold">Problem:</h2>
                         </div>
+                        <p className="text-white text-lg">{formatMathExpression(currentQuestion.question)}</p>
                     </div>
-                </div>
-                
-                {/* Question Content */}
-                <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-6">
-                    <h2 className="text-xl text-white font-bold mb-4">
-                        {formatMathExpression(currentQuestion?.question || "Loading question...")}
-                    </h2>
-                    
-                    {/* Remove multiple choice options from question section */}
-                    {/* Multiple choice options will only be shown in the Final Answer Box section below */}
+                )}
 
-                    {/* Working Space - OPTIONAL */}
-                    <div className="mb-6">
-                        <textarea
-                            value={scratchboardContent}
-                            onChange={(e) => {
-                                setScratchboardContent(e.target.value);
-                            }}
-                            className="w-full h-48 bg-white bg-opacity-10 text-white border rounded-lg p-3 resize-none border-gray-600"
-                            placeholder="Space for scratch work..."
-                            disabled={feedback.visible}
-                        />
-                    </div>
-
-                    {/* Final Answer Box */}
-                    <div className="mb-6">
-                        <label className="block text-white text-sm mb-2 items-center">
-                            <span className="mr-2">Your final answer (required):</span>
-                            {errors.answer && 
-                                <span className="text-red-400 text-xs">* You must provide an answer</span>
-                            }
-                        </label>
+                {/* Feedback Message - displayed after submission */}
+                {feedback.visible && (
+                    <div className={`p-4 mb-4 rounded-lg border-2 ${
+                        feedback.correct 
+                        ? 'bg-green-900 bg-opacity-30 border-green-500' 
+                        : 'bg-red-900 bg-opacity-30 border-red-500'
+                    }`}>
+                        <p className="text-white text-lg font-medium">
+                            {feedback.correct 
+                            ? 'Correct! Great job!' 
+                            : 'Incorrect.'}
+                        </p>
                         
-                        {/* Multiple Choice Selection */}
-                        {currentQuestion && currentQuestion.options && (
-                            <div className="grid grid-cols-1 gap-3 mb-4">
-                                {currentQuestion.options.map((option, index) => (
+                        {!feedback.correct && currentQuestion && (
+                            <p className="text-white mt-2">
+                                <span className="font-bold">Correct answer: </span> 
+                                {formatMathExpression(currentQuestion.correctAnswer || currentQuestion.answer)}
+                            </p>
+                        )}
+                    </div>
+                )}
+
+                {/* Final Answer Section */}
+                <div className="bg-white bg-opacity-15 p-4 rounded-md mb-4 border border-blue-500 flex-shrink-0">
+                    <h3 className="text-lg text-white font-semibold mb-2">Your Final Answer</h3>
+                    
+                    {/* Multiple Choice Selection */}
+                    {currentQuestion && currentQuestion.options && (
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                            {!feedback.visible ? (
+                                currentQuestion.options.map((option, index) => (
                                     <div 
                                         key={index}
                                         onClick={() => !feedback.visible && setFinalAnswer(option)}
@@ -411,7 +405,7 @@ export default function SoloPage() {
                                             finalAnswer === option 
                                                 ? 'bg-blue-500 bg-opacity-30 border-blue-500' 
                                                 : 'bg-white bg-opacity-10 border-gray-600'
-                                        } ${feedback.visible ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                        }`}
                                     >
                                         <div className="flex items-center">
                                             <div className={`w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center ${
@@ -424,78 +418,79 @@ export default function SoloPage() {
                                             <div className="text-white">{formatMathExpression(option)}</div>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                        
-                        {/* Text Input for non-multiple choice questions */}
-                        {(!currentQuestion || !currentQuestion.options) && (
-                            <input
-                                type="text"
-                                value={finalAnswer}
-                                onChange={(e) => {
-                                    setFinalAnswer(e.target.value);
-                                    if (e.target.value.trim()) {
-                                        setErrors(prev => ({...prev, answer: false}));
-                                    }
-                                }}
-                                className={`w-full bg-white bg-opacity-10 text-white border rounded-lg p-3 ${
-                                    errors.answer ? 'border-red-500' : 'border-gray-600'
-                                }`}
-                                placeholder="Enter your answer here..."
-                                disabled={feedback.visible}
-                            />
-                        )}
-                    </div>
-                    
-                    {/* Feedback Message */}
-                    {feedback.visible && (
-                        <div className={`p-4 mb-6 rounded-lg border-2 ${
-                            feedback.correct 
-                            ? 'bg-green-900 bg-opacity-30 border-green-500' 
-                            : 'bg-red-900 bg-opacity-30 border-red-500'
-                        }`}>
-                            <p className="text-white text-lg font-medium">
-                                {feedback.correct 
-                                ? 'Correct! Great job!' 
-                                : 'Incorrect.'}
-                            </p>
-                            
-                            {!feedback.correct && currentQuestion && (
-                                <p className="text-white mt-2">
-                                    <span className="font-bold">Correct answer: </span> 
-                                    {formatMathExpression(currentQuestion.correctAnswer || currentQuestion.answer)}
-                                </p>
+                                ))
+                            ) : (
+                                // After submission, show only the selected answer
+                                <div className="p-3 rounded-md border-2 bg-blue-500 bg-opacity-30 border-blue-500">
+                                    <div className="flex items-center">
+                                        <div className="w-6 h-6 mr-2 rounded-full border-2 flex items-center justify-center border-blue-500 bg-blue-500 text-white">
+                                            <span>✓</span>
+                                        </div>
+                                        <div className="text-white">{formatMathExpression(finalAnswer)}</div>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     )}
-
-                    {/* Action Buttons */}
-                    <div className="flex justify-end">
-                        {!feedback.visible ? (
-                            <button
-                                onClick={checkAnswer}
-                                disabled={!finalAnswer.trim() || !shouldEnableSubmit}
-                                className={`px-6 py-3 rounded-lg font-medium ${
-                                    finalAnswer.trim() && shouldEnableSubmit
-                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                                }`}
-                            >
-                                {shouldEnableSubmit 
-                                    ? 'Submit Answer' 
-                                    : `Wait ${Math.max(1, 10 - timeElapsed)}s...`
+                    
+                    {/* Text Input for non-multiple choice questions */}
+                    {(!currentQuestion || !currentQuestion.options) && (
+                        <input
+                            type="text"
+                            value={finalAnswer}
+                            onChange={(e) => {
+                                setFinalAnswer(e.target.value);
+                                if (e.target.value.trim()) {
+                                    setErrors(prev => ({...prev, answer: false}));
                                 }
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleFinishLesson}
-                                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"
-                            >
-                                Continue
-                            </button>
-                        )}
-                    </div>
+                            }}
+                            className={`w-full bg-white bg-opacity-10 text-white border rounded-md px-3 py-2 ${
+                                errors.answer ? 'border-red-500' : 'border-gray-600'
+                            }`}
+                            placeholder="Enter your answer here..."
+                            disabled={feedback.visible}
+                        />
+                    )}
+                    
+                    {/* Error message for answer */}
+                    {errors.answer && 
+                        <p className="text-red-400 text-xs mt-1">* You must provide an answer</p>
+                    }
+                    
+                    {!feedback.visible ? (
+                        <button
+                            onClick={checkAnswer}
+                            disabled={!finalAnswer.trim() || !shouldEnableSubmit}
+                            className={`w-full mt-2 px-4 py-2 rounded-md font-medium ${
+                                finalAnswer.trim() && shouldEnableSubmit
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                            }`}
+                        >
+                            {shouldEnableSubmit 
+                                ? 'Submit Final Answer' 
+                                : `Wait ${Math.max(1, 10 - timeElapsed)}s...`
+                            }
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleFinishLesson}
+                            className="w-full mt-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium"
+                        >
+                            Continue
+                        </button>
+                    )}
+                </div>
+
+                {/* Scratchboard */}
+                <div className="flex-1 border border-gray-600 rounded-md p-3 bg-black bg-opacity-30 overflow-auto">
+                    <textarea
+                        value={scratchboardContent}
+                        onChange={(e) => setScratchboardContent(e.target.value)}
+                        className="w-full h-[calc(100%-40px)] min-h-[200px] bg-black bg-opacity-40 text-white border-none rounded p-2"
+                        placeholder="Space for scratch work..."
+                        disabled={feedback.visible}
+                    />
                 </div>
             </div>
         </div>
