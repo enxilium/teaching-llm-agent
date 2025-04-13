@@ -13,7 +13,7 @@ export default function CompletedPage() {
     if (hasSubmitted) {
       // Set a timeout to redirect to Prolific completion URL after 5 seconds
       const redirectTimer = setTimeout(() => {
-        window.location.href = 'https://app.prolific.com/submissions/complete?cc=C13Q7C8J%27';
+        window.location.href = 'https://app.prolific.com/submissions/complete?cc=C14H5P95';
       }, 5000);
       
       // Clean up timer if component unmounts

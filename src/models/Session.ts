@@ -21,6 +21,7 @@ export interface SessionDocument extends Document {
   timeoutOccurred: boolean;
   tempRecord: boolean;
   lessonType: string;
+  hitId?: string;
   surveyData?: {
     confusionLevel?: string;
     testDifficulty?: string;
@@ -102,6 +103,11 @@ const SessionSchema = new Schema(
       index: true
     },
     lessonType: {
+      type: String,
+      required: false,
+      default: null
+    },
+    hitId: {
       type: String,
       required: false,
       default: null

@@ -66,7 +66,7 @@ const formatTime = (seconds: number): string => {
 
 export default function SinglePage() {
     const router = useRouter();
-    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext, lessonType } = useFlow();
+    const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext, lessonType, hitId } = useFlow();
     
     // Debug line to see what's happening
     console.log("SINGLE PAGE - Current stage:", currentStage, "Question index:", lessonQuestionIndex);
@@ -260,7 +260,8 @@ export default function SinglePage() {
                 messages: prepareMessagesForStorage(messages),
                 isCorrect,
                 timeoutOccurred: isTimeout,
-                lessonType: lessonType // Include the lessonType (scenario type)
+                lessonType: lessonType, // Include the lessonType (scenario type)
+                hitId: hitId // Explicitly include hitId from flow context
             };
             
             // Save to flow context

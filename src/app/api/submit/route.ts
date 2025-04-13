@@ -35,6 +35,7 @@ interface SessionData {
   messages?: any[];
   isCorrect?: boolean;
   timeoutOccurred?: boolean;
+  hitId?: string;
 }
 
 interface CompleteData {
@@ -44,6 +45,7 @@ interface CompleteData {
   questionResponses?: Question[];
   sessionData?: SessionData[];
   lessonType?: string;
+  hitId?: string;
   completedAt?: string | Date;
   messages?: any[];
 }
@@ -213,6 +215,7 @@ export async function POST(request: NextRequest) {
             isCorrect: !!sessionData.isCorrect,
             timeoutOccurred: !!sessionData.timeoutOccurred,
             lessonType: completeData.lessonType || null,
+            hitId: sessionData.hitId || completeData.hitId || null,
             submittedAt: new Date()
           });
           

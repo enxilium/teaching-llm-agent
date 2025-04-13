@@ -177,7 +177,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const resetFlow = () => {
     // Extract workerId, hitId, and assignmentId from URL query parameters if available
     let newUserId = "test" + Math.floor(Math.random() * 10000); // Default fallback for development
-    let hitId = '';
+    let hitId = "hit" + Math.floor(Math.random() * 10000); // Default fallback for hitId
     let assignmentId = '';
     
     console.log("========== FLOW INITIALIZATION ==========");
@@ -199,7 +199,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       // Store hitId and assignmentId if available
       if (hitIdParam) {
         hitId = hitIdParam;
-        console.log(`📋 HIT ID: ${hitId}`);
+        console.log(`📋 HIT ID: ${hitId} (from hitId parameter)`);
+      } else {
+        console.log(`📋 HIT ID: ${hitId} (generated for development)`);
       }
       
       if (assignmentIdParam) {
@@ -333,7 +335,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       ...sessionData,
       scratchboardContent: sessionData.scratchboardContent || '',
       messages: messagesCopy,
-      lessonType: lessonType // Add lessonType from the flow context
+      lessonType: lessonType, // Add lessonType from the flow context
+      hitId: hitId // Add hitId from the flow context
     };
     
     // Update state with atomic operation
@@ -344,6 +347,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
           ...sanitizedSessionData,
           userId,
           lessonType: lessonType, // Ensure lessonType is included
+          hitId: hitId, // Ensure hitId is included
           _savedAt: new Date().toISOString() // Add timestamp for tracking
         }]
       };
@@ -359,6 +363,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             messages: sanitizedSessionData.messages,
             scratchboardContent: sanitizedSessionData.scratchboardContent,
             lessonType: lessonType, // Include lessonType in the backup
+            hitId: hitId, // Include hitId in the backup
             _savedAt: new Date().toISOString()
           };
           localStorage.setItem(`session_backup_${sanitizedSessionData.questionId}`, JSON.stringify(sessionBackup));
@@ -767,6 +772,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({
             userId: flowData.userId,
             testId: flowData.testId,
+            hitId: flowData.hitId,
             completedAt: new Date().toISOString(),
             questionResponses: flowData.questions || [],
             surveyData: surveyDataToSubmit,
@@ -774,7 +780,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             testData: flowData.testData || [],
             sessionData: flowData.sessionData || [],
             messages: flowData.messages || [],
-            lessonType: flowData.lessonType // Add lessonType to the submission
+            lessonType: flowData.lessonType
           }),
         });
         
@@ -806,20 +812,19 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({
             userId: flowData.userId,
             testId: flowData.testId,
+            hitId: flowData.hitId,
             completedAt: new Date().toISOString(),
             questionResponses: flowData.questions || [],
-            // Send empty survey data with error flag
             surveyData: { 
               error: "Survey data not found",
               recoveryAttempted: true,
               timestamp: new Date().toISOString()
             },
             sessionId: flowData.sessionId,
-            // Add testData and sessionData arrays to the submission
             testData: flowData.testData || [],
             sessionData: flowData.sessionData || [],
             messages: flowData.messages || [],
-            lessonType: flowData.lessonType // Add lessonType to the submission
+            lessonType: flowData.lessonType
           }),
         });
         
