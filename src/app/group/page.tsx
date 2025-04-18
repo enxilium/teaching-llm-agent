@@ -1658,7 +1658,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                     
                     {/* Multiple Choice Options - show when question has options */}
                     {currentQuestion && typeof currentQuestion === 'object' && currentQuestion.options && (
-                        <div className="grid grid-cols-1 gap-2 mb-3">
+                        <div className="grid grid-cols-2 gap-2 mb-3">
                             {!hasSubmittedAnswer ? (
                                 // Show all options before submission
                                 Array.isArray(currentQuestion.options) ? (

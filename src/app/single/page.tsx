@@ -1249,7 +1249,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
                     
                     {/* Multiple Choice Options - show when question has options */}
                     {currentQuestion && currentQuestion.options && (
-                        <div className="grid grid-cols-1 gap-2 mb-3">
+                        <div className="grid grid-cols-2 gap-2 mb-3">
                             {!hasSubmittedAnswer ? (
                                 Array.isArray(currentQuestion.options) ? (
                                     // Handle array-style options
