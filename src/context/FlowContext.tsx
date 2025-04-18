@@ -593,7 +593,39 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     }, 300);
   };
 
-  const completeLesson = () => {
+  // Add this new function before completeLesson
+  const submitSessionData = async (sessionData: SessionData[]) => {
+    console.log("💾 Attempting to submit session data...");
+    
+    try {
+      const response = await fetch('/api/submit-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: flowData.userId,
+          hitId: flowData.hitId,
+          sessionData: sessionData,
+          lessonType: flowData.lessonType,
+          submittedAt: new Date().toISOString()
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${await response.text()}`);
+      }
+      
+      const result = await response.json();
+      console.log("✅ Successfully submitted session data:", result);
+      return true;
+    } catch (error) {
+      console.error("❌ Failed to submit session data:", error);
+      return false;
+    }
+  };
+
+  const completeLesson = async () => {
     console.log('Starting lesson completion transition...');
     
     try {
@@ -602,6 +634,25 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         console.log('Creating persistent backup before navigation');
         localStorage.setItem('flowData_preserved', JSON.stringify(flowData));
         localStorage.setItem('currentStage', 'tetris-break');
+        
+        // ADDED: Additional verification of session data
+        console.log(`Verifying session data before navigation: ${flowData.sessionData?.length || 0} sessions found`);
+        if (flowData.sessionData?.length > 0) {
+          // Create explicit backup of the latest session
+          const latestSession = flowData.sessionData[flowData.sessionData.length - 1];
+          localStorage.setItem(`latest_session_backup`, JSON.stringify(latestSession));
+          console.log(`Latest session backed up with ${latestSession.messages?.length || 0} messages`);
+          
+          // ADDED: Submit session data before navigation
+          console.log('Submitting session data to database...');
+          const submissionSuccess = await submitSessionData(flowData.sessionData);
+          
+          if (!submissionSuccess) {
+            console.warn('Session data submission failed - continuing with navigation');
+          }
+        } else {
+          console.warn('No session data found before navigation - possible data loss!');
+        }
       }
       
       // Update the state in a safer way
@@ -623,7 +674,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         return updated;
       });
       
-      // Add a significant delay before navigation to ensure state updates complete
+      // INCREASED: Add a longer delay before navigation to ensure state updates complete
       setTimeout(() => {
         try {
           // Verify our stage was properly updated
@@ -635,6 +686,13 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem('currentStage', 'tetris-break');
           }
           
+          // Verify session data is in localStorage as final check
+          const storedFlowData = localStorage.getItem('flowData');
+          if (storedFlowData) {
+            const parsedData = JSON.parse(storedFlowData);
+            console.log(`Final verification: ${parsedData.sessionData?.length || 0} sessions in localStorage`);
+          }
+          
           console.log('Navigating to break page...');
           router.push('/break');
         } catch (error) {
@@ -642,7 +700,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
           // Emergency fallback
           window.location.href = '/break';
         }
-      }, 600);
+      }, 1000); // Increased from 600ms to 1000ms
     } catch (error) {
       console.error('Error in completeLesson:', error);
       // Last resort emergency redirect
@@ -654,27 +712,64 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const completePostTest = () => {
     console.log("Starting post-test completion transition");
     
-    // Update state
-    setFlowData(prev => ({
-        ...prev,
-        currentStage: 'final-test'
-    }));
-    
-    // Update localStorage
+    // ADDED: Create explicit backup of flow data before navigation
     if (typeof window !== 'undefined') {
-        localStorage.setItem('currentStage', 'final-test');
+      console.log('Creating persistent backup before final test');
+      localStorage.setItem('flowData_post_test_complete', JSON.stringify(flowData));
+      localStorage.setItem('currentStage', 'final-test');
+      
+      // Verify session data exists
+      console.log(`Verifying session data: ${flowData.sessionData?.length || 0} sessions found`);
+      
+      // Create backup of all sessions
+      if (flowData.sessionData?.length > 0) {
+        flowData.sessionData.forEach((session, index) => {
+          localStorage.setItem(`session_backup_${session.questionId || index}`, JSON.stringify(session));
+          console.log(`Session ${index + 1} backed up with ${session.messages?.length || 0} messages`);
+        });
+      }
     }
     
-    // Navigate with delay
-    setTimeout(() => {
+    // Update state with increased safety
+    setFlowData(prev => {
+      const updated = {
+        ...prev,
+        currentStage: 'final-test' as FlowStage
+      };
+      
+      // Update localStorage immediately
+      if (typeof window !== 'undefined') {
         try {
-            router.push('/test?stage=final');
-        } catch (error) {
-            console.error("Navigation error:", error);
-            // Fallback direct navigation
-            window.location.href = '/test?stage=final';
+          localStorage.setItem('flowData', JSON.stringify(updated));
+          console.log('Updated flowData in localStorage with new stage: final-test');
+        } catch (e) {
+          console.error("Error saving to localStorage during transition:", e);
         }
-    }, 300);
+      }
+      
+      return updated;
+    });
+    
+    // Add delay before navigation to ensure state updates complete
+    setTimeout(() => {
+      try {
+        // Verify our stage was properly updated
+        const currentSavedStage = localStorage.getItem('currentStage');
+        console.log(`Stage before navigation: ${currentSavedStage}`);
+        
+        if (currentSavedStage !== 'final-test') {
+          console.warn('Stage mismatch, forcing correction in localStorage');
+          localStorage.setItem('currentStage', 'final-test');
+        }
+        
+        console.log('Navigating to final test page...');
+        router.push('/test?stage=final');
+      } catch (error) {
+        console.error("Navigation error:", error);
+        // Fallback direct navigation
+        window.location.href = '/test?stage=final';
+      }
+    }, 1000); // Increased delay to ensure state is updated
   };
 
   const completeTetrisBreak = () => {
@@ -721,6 +816,64 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     setIsSubmitting(true);
     
     try {
+      // ADDED: Explicit session data verification
+      if (!flowData.sessionData || flowData.sessionData.length === 0) {
+        console.warn("⚠️ No session data found in flow context - attempting recovery from backups...");
+        
+        // Try to recover from localStorage backup
+        if (typeof window !== 'undefined') {
+          try {
+            // Check latest session backup first
+            const latestSessionBackup = localStorage.getItem('latest_session_backup');
+            if (latestSessionBackup) {
+              const sessionData = JSON.parse(latestSessionBackup);
+              console.log("✅ Recovered latest session from dedicated backup");
+              
+              // Add recovered session to flowData - using state update
+              setFlowData(prev => ({
+                ...prev,
+                sessionData: [...(prev.sessionData || []), sessionData]
+              }));
+            }
+            
+            // Also check for other session backups
+            const keys = Object.keys(localStorage);
+            const sessionBackupKeys = keys.filter(key => key.startsWith('session_backup_'));
+            
+            if (sessionBackupKeys.length > 0) {
+              console.log(`Found ${sessionBackupKeys.length} session backups in localStorage`);
+              
+              const recoveredSessions = sessionBackupKeys.map(key => {
+                try {
+                  return JSON.parse(localStorage.getItem(key) || '{}');
+                } catch (e) {
+                  console.error(`Failed to parse session backup ${key}:`, e);
+                  return null;
+                }
+              }).filter(Boolean);
+              
+              if (recoveredSessions.length > 0) {
+                console.log(`Recovered ${recoveredSessions.length} sessions from localStorage backups`);
+                
+                // Add recovered sessions to flowData
+                setFlowData(prev => ({
+                  ...prev,
+                  sessionData: [...(prev.sessionData || []), ...recoveredSessions]
+                }));
+              }
+            }
+          } catch (e) {
+            console.error("Failed to recover session data from localStorage:", e);
+          }
+        }
+      } else {
+        console.log(`Found ${flowData.sessionData.length} sessions in flow context`);
+        // Log details of sessions
+        flowData.sessionData.forEach((session, index) => {
+          console.log(`Session ${index + 1}: questionId=${session.questionId}, messages=${session.messages?.length || 0}`);
+        });
+      }
+      
       // Check if we have survey data in the flow context
       let surveyDataToSubmit = flowData.surveyData;
       
@@ -762,6 +915,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       if (surveyDataToSubmit) {
         console.log("📤 Submitting with survey data:", surveyDataToSubmit);
         console.log("📤 Scenario type (lessonType):", flowData.lessonType);
+        console.log("📤 Session data count:", (flowData.sessionData || []).length);
         
         // Final submission with all required data
         const response = await fetch('/api/submit', {
@@ -778,7 +932,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             surveyData: surveyDataToSubmit,
             sessionId: flowData.sessionId,
             testData: flowData.testData || [],
-            sessionData: flowData.sessionData || [],
+            sessionData: flowData.sessionData?.map(session => ({
+              ...session,
+              alreadySubmitted: true // Mark as already submitted
+            })) || [],
             messages: flowData.messages || [],
             lessonType: flowData.lessonType
           }),
@@ -790,11 +947,19 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         
         const result = await response.json();
         console.log("✅ Successfully submitted all data:", result);
+        console.log(`✅ Session data submitted: ${(flowData.sessionData || []).length} sessions`);
         
         // Clear localStorage after successful submission
         if (typeof window !== 'undefined') {
           localStorage.removeItem('flowData');
           localStorage.removeItem('surveyData_backup');
+          localStorage.removeItem('latest_session_backup');
+          
+          // Also clear any session backups
+          const keys = Object.keys(localStorage);
+          keys.filter(key => key.startsWith('session_backup_')).forEach(key => {
+            localStorage.removeItem(key);
+          });
         }
         
         // Mark as submitted but don't redirect to thank-you page
