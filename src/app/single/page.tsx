@@ -264,14 +264,12 @@ export default function SinglePage() {
                 hitId: hitId // Explicitly include hitId from flow context
             };
             
-            // Save to flow context - return a Promise to allow proper awaiting
+            // Save to flow context
             saveToFlowContext(sessionDataObj);
             
             console.log(`✅ SINGLE [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
-            return true; // Return success for Promise chaining
         } catch (error) {
             console.error(`❌ SINGLE [Session Save] Error saving session data:`, error);
-            return false; // Return failure for Promise chaining
         }
     };
 
@@ -285,9 +283,6 @@ export default function SinglePage() {
                 // Time to move to next page
                 console.log('Discussion time expired - navigating to next page');
                 
-                // IMPORTANT: Mark the round as ended to prevent further timer decrements
-                roundEndedRef.current = true;
-                
                 // Show message about moving on
                 const timeUpMessageId = getUniqueMessageId();
                 setMessages(prev => [
@@ -300,25 +295,15 @@ export default function SinglePage() {
                     }
                 ]);
                 
-                // Save session data before navigating - using Promise pattern
+                // Save session data before navigating
                 setTimeout(() => {
                     console.log(`💬 SINGLE Saving final session with ${messages.length + 1} messages`);
-                    saveSessionData(finalAnswer.trim() || selectedOption || "No answer specified", false)
-                        .then(() => {
-                            console.log('Final session data saved successfully, completing lesson now');
-                            // Add a longer delay before navigating to ensure state updates are complete
-                            setTimeout(() => {
-                                console.log('Completing lesson and transitioning to break...');
-                                completeLesson();
-                            }, 2000);
-                        })
-                        .catch(error => {
-                            console.error('Error saving final session data:', error);
-                            // Still proceed with lesson completion even if save fails
-                            setTimeout(() => {
-                                completeLesson();
-                            }, 2000);
-                        });
+                    saveSessionData(finalAnswer.trim() || selectedOption || "No answer specified", false);
+                    
+                    // Navigate after data is saved
+                    setTimeout(() => {
+                        completeLesson();
+                    }, 1000);
                 }, 1000);
                 
                 return;
