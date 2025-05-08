@@ -1,0 +1,31 @@
+// Recommended Firebase Firestore Security Rules
+// Copy and paste these rules into your Firebase Console > Firestore Database > Rules tab
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Allow writes only to experiment_data collection
+    match /experiment_data/{docId} {
+      // Option 1: Allow only server-side access (most secure)
+      // With this rule, only the Admin SDK used in your API route can write
+      // Client-side access will be blocked (this is what you want!)
+      allow read, write: if false;
+
+      // Option 2: Allow both server-side and client-side emergency fallback
+      // Uncomment this if you want to enable the client-side fallback in emergency situations
+      // allow write: if request.resource.data._meta.source == "failsafe_backup";
+      // allow read: if false;
+    }
+  }
+}
+
+// INSTRUCTIONS:
+// 1. Use Option 1 (default) for maximum security - only server-side writes allowed
+// 2. Only enable Option 2 if you need a client-side fallback for reliability
+// 3. The current implementation is already set up to use server-side Firebase Admin SDK
+//    so client-side access failures are expected and handled appropriately 

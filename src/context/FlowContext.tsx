@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { saveExperimentData } from '@/lib/storage-service';
 
 // Define flow stages
 type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
@@ -758,88 +759,92 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         }
       }
       
-      // Now check if we have survey data to submit
-      if (surveyDataToSubmit) {
-        console.log("📤 Submitting with survey data:", surveyDataToSubmit);
-        console.log("📤 Scenario type (lessonType):", flowData.lessonType);
+      // Get sessionData and ensure it's an array
+      let sessionDataToSubmit = flowData.sessionData || [];
+      
+      // Check if questionResponses exists in flowData.questions
+      if (flowData.questions && Array.isArray(flowData.questions) && flowData.questions.length > 0) {
+        // Create a dedicated sessionData entry for questionResponses
+        console.log("📝 Adding questionResponses to sessionData");
         
-        // Final submission with all required data
-        const response = await fetch('/api/submit', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId: flowData.userId,
-            testId: flowData.testId,
-            hitId: flowData.hitId,
-            completedAt: new Date().toISOString(),
-            questionResponses: flowData.questions || [],
-            surveyData: surveyDataToSubmit,
-            sessionId: flowData.sessionId,
-            testData: flowData.testData || [],
-            sessionData: flowData.sessionData || [],
-            messages: flowData.messages || [],
-            lessonType: flowData.lessonType
-          }),
-        });
+        // Create a special session data entry that follows the required structure
+        const questionResponsesEntry: SessionData = {
+          questionId: 9999, // Special ID to mark this as question responses data
+          questionText: "Question Responses Collection",
+          startTime: new Date(),
+          endTime: new Date(),
+          duration: 0,
+          finalAnswer: JSON.stringify(flowData.questions),
+          scratchboardContent: "",
+          messages: [], // Empty messages array
+          isCorrect: true,
+          timeoutOccurred: false
+        };
         
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}: ${await response.text()}`);
-        }
+        sessionDataToSubmit.push(questionResponsesEntry);
+      }
+      
+      // Prepare the complete data payload - no separate messages or questionResponses fields
+      const completeData = {
+        userId: flowData.userId,
+        testId: flowData.testId,
+        hitId: flowData.hitId,
+        assignmentId: flowData.assignmentId,
+        completedAt: new Date().toISOString(),
+        surveyData: surveyDataToSubmit || {
+          error: "Survey data not found",
+          recoveryAttempted: true
+        },
+        sessionId: flowData.sessionId,
+        testData: flowData.testData || [],
+        sessionData: sessionDataToSubmit,
+        lessonType: flowData.lessonType
+      };
+      
+      console.log("📤 Submitting with data for user:", flowData.userId);
+      console.log("📤 Scenario type (lessonType):", flowData.lessonType);
+      console.log("📤 SessionData entries:", sessionDataToSubmit.length);
+      
+      // Use our new failsafe storage service
+      try {
+        // Try to store data with our failsafe service
+        const results = await saveExperimentData(completeData);
         
-        const result = await response.json();
-        console.log("✅ Successfully submitted all data:", result);
+        console.log("✅ Data successfully saved using failsafe approach:", results);
         
         // Clear localStorage after successful submission
         if (typeof window !== 'undefined') {
+          // Keep a backup copy just in case
+          localStorage.setItem('submitted_data_backup', JSON.stringify({
+            flowData,
+            submittedAt: new Date().toISOString()
+          }));
+          
+          // Remove working copies
           localStorage.removeItem('flowData');
           localStorage.removeItem('surveyData_backup');
         }
         
-        // Mark as submitted but don't redirect to thank-you page
+        // Mark as submitted
         setHasSubmitted(true);
-      } else {
-        // Create a fallback submission without survey data as last resort
-        console.error("❌ No survey data found for submission - sending partial data");
-        console.log("📤 Scenario type (lessonType):", flowData.lessonType);
+      } catch (error) {
+        console.error("❌ Failed to submit data:", error);
+        setSubmissionError(error instanceof Error ? error.message : String(error));
         
-        const response = await fetch('/api/submit', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId: flowData.userId,
-            testId: flowData.testId,
-            hitId: flowData.hitId,
-            completedAt: new Date().toISOString(),
-            questionResponses: flowData.questions || [],
-            surveyData: { 
-              error: "Survey data not found",
-              recoveryAttempted: true,
-              timestamp: new Date().toISOString()
-            },
-            sessionId: flowData.sessionId,
-            testData: flowData.testData || [],
-            sessionData: flowData.sessionData || [],
-            messages: flowData.messages || [],
-            lessonType: flowData.lessonType
-          }),
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}: ${await response.text()}`);
+        // Create an emergency backup in localStorage
+        if (typeof window !== 'undefined') {
+          const emergencyKey = `final_backup_${Date.now()}`;
+          localStorage.setItem(emergencyKey, JSON.stringify({
+            flowData,
+            completeData,
+            error: String(error),
+            timestamp: new Date().toISOString()
+          }));
+          console.log(`📦 Created final emergency backup in localStorage: ${emergencyKey}`);
         }
-        
-        const result = await response.json();
-        console.log("⚠️ Submitted partial data (without survey):", result);
-        
-        // Mark as submitted but don't redirect to thank-you page
-        setHasSubmitted(true);
       }
     } catch (error) {
-      console.error("❌ Failed to submit data:", error);
+      console.error("❌ Failed to prepare data for submission:", error);
       setSubmissionError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsSubmitting(false);
