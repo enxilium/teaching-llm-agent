@@ -36,8 +36,8 @@ export async function POST(request: Request) {
     // Initialize results object
     const results = {
       surveyId: null,
-      testIds: [],
-      sessionIds: [],
+      testIds: [] as string[],
+      sessionIds: [] as string[],
       success: true
     };
     
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         for (const testData of completeData.testData) {
           // Prepare questions with proper structure
           const questionsData = Array.isArray(testData.questions) 
-            ? testData.questions.map(q => ({
+            ? testData.questions.map((q: { questionId: any; question: any; userAnswer: any; correctAnswer: any; isCorrect: any; scratchboardContent: any; duration: any; }) => ({
                 questionId: q.questionId,
                 question: q.question || '',
                 userAnswer: q.userAnswer || '',
@@ -111,6 +111,41 @@ export async function POST(request: Request) {
         console.log(`📝 Processing ${completeData.sessionData.length} session datasets`);
         
         for (const sessionData of completeData.sessionData) {
+          // Validate required fields for session data
+          if (!sessionData.questionId) {
+            console.error("❌ Missing questionId in session data");
+            continue; // Skip this session
+          }
+
+          // Debug logging to track session data
+          console.log(`📊 Processing session for questionId: ${sessionData.questionId}`);
+          console.log(`   Msg count: ${Array.isArray(sessionData.messages) ? sessionData.messages.length : 'N/A'}`);
+          console.log(`   Scratchboard content length: ${(sessionData.scratchboardContent || '').length} chars`);
+
+          // Process messages if they exist - handle possible format issues
+          let processedMessages = [];
+          if (sessionData.messages) {
+            try {
+              // Sanitize messages to ensure they match expected structure
+              processedMessages = Array.isArray(sessionData.messages) 
+                ? sessionData.messages.map((msg: any) => ({
+                    id: typeof msg.id === 'number' ? msg.id : parseInt(msg.id) || 0,
+                    sender: String(msg.sender || 'system'),
+                    agentId: msg.agentId || null,
+                    text: typeof msg.text === 'string' ? msg.text : String(msg.text || ''),
+                    timestamp: msg.timestamp instanceof Date 
+                      ? msg.timestamp 
+                      : new Date(msg.timestamp || Date.now())
+                  }))
+                : [];
+              
+              console.log(`✅ Processed ${processedMessages.length} messages for session ${sessionData.questionId}`);
+            } catch (msgError) {
+              console.error(`❌ Error processing messages for session ${sessionData.questionId}:`, msgError);
+              processedMessages = []; // Use empty array as fallback
+            }
+          }
+
           // Create session document
           const session = new Session({
             userId: completeData.userId,
@@ -121,22 +156,79 @@ export async function POST(request: Request) {
             duration: sessionData.duration || 0,
             finalAnswer: sessionData.finalAnswer || '',
             scratchboardContent: sessionData.scratchboardContent || '',
-            messages: sessionData.messages || [],
+            messages: processedMessages,
             isCorrect: !!sessionData.isCorrect,
             timeoutOccurred: !!sessionData.timeoutOccurred,
-            lessonType: completeData.lessonType || null,
+            tempRecord: false, // Set required field from schema
+            lessonType: sessionData.lessonType || completeData.lessonType || null,
             hitId: sessionData.hitId || completeData.hitId || null,
             submittedAt: new Date()
           });
           
-          const savedSession = await session.save();
-          console.log(`✅ Session saved with ID: ${savedSession._id}`);
-          results.sessionIds.push(savedSession._id.toString());
+          try {
+            const savedSession = await session.save();
+            console.log(`✅ Session saved with ID: ${savedSession._id}`);
+            results.sessionIds.push(savedSession._id.toString());
+          } catch (saveError: any) {  // Add explicit any type to allow property access
+            // Log detailed error for this specific session
+            console.error(`❌ Error saving session for questionId ${sessionData.questionId}:`, saveError);
+            
+            // If it's a validation error, get more detailed information
+            if (saveError.name === 'ValidationError') {
+              const validationErrors = Object.keys(saveError.errors || {}).map(field => ({
+                field,
+                message: saveError.errors[field].message
+              }));
+              console.error("Validation errors:", JSON.stringify(validationErrors, null, 2));
+            }
+            
+            console.error("Session data:", JSON.stringify({
+              userId: completeData.userId,
+              questionId: sessionData.questionId,
+              // Log only a few key fields to avoid excessive logging
+              hasQuestionText: !!sessionData.questionText,
+              hasMessages: Array.isArray(sessionData.messages) && sessionData.messages.length > 0,
+              messageSample: Array.isArray(sessionData.messages) && sessionData.messages.length > 0 
+                ? JSON.stringify(sessionData.messages[0]) : 'No messages'
+            }));
+            
+            // Try to save with minimum required fields as last resort
+            try {
+              console.log("⚠️ Attempting emergency save with minimum fields...");
+              
+              const emergencySession = new Session({
+                userId: completeData.userId,
+                questionId: sessionData.questionId,
+                questionText: sessionData.questionText || 'Emergency recovery',
+                startTime: new Date(),
+                endTime: new Date(),
+                duration: 0,
+                finalAnswer: sessionData.finalAnswer || 'Emergency recovery',
+                scratchboardContent: '',
+                messages: [], // Empty array for safety
+                isCorrect: false,
+                timeoutOccurred: false,
+                tempRecord: false,
+                lessonType: completeData.lessonType || null,
+                hitId: completeData.hitId || null,
+                submittedAt: new Date()
+              });
+              
+              const savedEmergency = await emergencySession.save();
+              console.log(`✅ Emergency session saved with ID: ${savedEmergency._id}`);
+              results.sessionIds.push(savedEmergency._id.toString());
+            } catch (emergencyError) {
+              console.error("❌ Even emergency save failed:", emergencyError);
+              results.success = false;
+            }
+          }
         }
       } catch (error) {
-        console.error("❌ Error saving session data:", error);
+        console.error("❌ Error processing session data:", error);
         results.success = false;
       }
+    } else {
+      console.warn("⚠️ No sessionData array found in submission or it's not an array");
     }
     
     // Even if some parts failed, return a 200 with detailed results

@@ -762,6 +762,75 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       // Get sessionData and ensure it's an array
       let sessionDataToSubmit = flowData.sessionData || [];
       
+      // WARNING: Check if sessionData is empty - this shouldn't happen unless something went wrong
+      if (!sessionDataToSubmit || sessionDataToSubmit.length === 0) {
+        console.error("⚠️ CRITICAL: No session data found in flow context! Attempting recovery...");
+        
+        // Try to get from localStorage backup
+        if (typeof window !== 'undefined') {
+          try {
+            const storedFlowData = localStorage.getItem('flowData');
+            if (storedFlowData) {
+              const parsedFlowData = JSON.parse(storedFlowData);
+              if (parsedFlowData.sessionData && parsedFlowData.sessionData.length > 0) {
+                sessionDataToSubmit = parsedFlowData.sessionData;
+                console.log(`✅ Recovered ${sessionDataToSubmit.length} session entries from localStorage`);
+              }
+            }
+          } catch (e) {
+            console.error("Failed to parse localStorage flowData for session recovery:", e);
+          }
+        }
+        
+        // If still no session data, this is a serious problem
+        if (sessionDataToSubmit.length === 0) {
+          console.error("❌ Failed to recover any session data. Creating emergency placeholder to prevent data loss.");
+          
+          // Create an emergency placeholder session to ensure we have at least some data
+          const emergencySession: SessionData = {
+            questionId: 0,
+            questionText: "EMERGENCY RECOVERY - Session data was missing",
+            startTime: new Date(),
+            endTime: new Date(),
+            duration: 0,
+            finalAnswer: JSON.stringify({
+              error: "Session data missing",
+              flowDataKeys: Object.keys(flowData),
+              userId: flowData.userId,
+              lessonType: flowData.lessonType,
+              currentStage: flowData.currentStage
+            }),
+            scratchboardContent: "",
+            messages: [],
+            isCorrect: false,
+            timeoutOccurred: false
+          };
+          
+          sessionDataToSubmit = [emergencySession];
+        }
+      }
+      
+      // Validate each session entry before submission
+      console.log(`🔍 Validating ${sessionDataToSubmit.length} session entries before submission...`);
+      
+      // Make a deep copy to avoid modifying the original
+      sessionDataToSubmit = sessionDataToSubmit.map(session => {
+        // Ensure all required fields are present with valid values
+        return {
+          questionId: session.questionId || 0,
+          questionText: session.questionText || "No question text",
+          startTime: session.startTime || new Date(),
+          endTime: session.endTime || new Date(),
+          duration: session.duration || 0,
+          finalAnswer: session.finalAnswer || "",
+          scratchboardContent: session.scratchboardContent || "",
+          // Ensure messages is an array
+          messages: Array.isArray(session.messages) ? session.messages : [],
+          isCorrect: Boolean(session.isCorrect),
+          timeoutOccurred: Boolean(session.timeoutOccurred)
+        };
+      });
+      
       // Check if questionResponses exists in flowData.questions
       if (flowData.questions && Array.isArray(flowData.questions) && flowData.questions.length > 0) {
         // Create a dedicated sessionData entry for questionResponses
@@ -804,6 +873,12 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       console.log("📤 Submitting with data for user:", flowData.userId);
       console.log("📤 Scenario type (lessonType):", flowData.lessonType);
       console.log("📤 SessionData entries:", sessionDataToSubmit.length);
+      
+      // Additional debug logging - log unique question IDs to help debug
+      if (sessionDataToSubmit.length > 0) {
+        const questionIds = sessionDataToSubmit.map(s => s.questionId).sort((a, b) => a - b);
+        console.log("📊 Session questionIds included:", questionIds.join(', '));
+      }
       
       // Use our new failsafe storage service
       try {
