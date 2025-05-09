@@ -38,7 +38,7 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
     const [gameOver, setGameOver] = useState(false);
     const [gameStarted, setGameStarted] = useState(false);
     const [completionCalled, setCompletionCalled] = useState(false);
-    const [timeRemaining, setTimeRemaining] = useState(10); // Change back to 120 seconds (2 minutes)
+    const [timeRemaining, setTimeRemaining] = useState(120); // Changed from 10 to 120 seconds (2 minutes)
 
     // Generate a random piece
     const getRandomPiece = useCallback((): Piece => {
