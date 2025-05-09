@@ -61,7 +61,7 @@ const formatMathExpression = (text: string) => {
 // Create a component to safely use search params
 function TestContent() {
     const searchParams = useSearchParams();
-    const testStage = searchParams.get('stage') || 'pre'; // Default to pre-test
+    const testStage = searchParams?.get('stage') || 'pre'; // Default to pre-test
     
     // Get flow context
     const { 

@@ -6,6 +6,19 @@
 import { saveDataToFirebase } from './firebase';
 import { retryWithBackoff } from './retry';
 
+// Define types for the results object
+interface StorageResult {
+  success: boolean;
+  error: null | unknown;
+  data?: any;
+}
+
+interface StorageResults {
+  mongodb: StorageResult;
+  firebase: StorageResult;
+  overallSuccess: boolean;
+}
+
 /**
  * Save experimental data with failsafe mechanism
  * Tries MongoDB first, then Firebase as backup, with retries for both
@@ -29,11 +42,11 @@ export async function saveExperimentData(data: any) {
   console.log('📊 Data structure check:', {
     userId: data.userId,
     sessionDataCount: data.sessionData?.length || 0,
-    hasMessages: data.sessionData?.some(s => s.messages && s.messages.length > 0) || false,
+    hasMessages: data.sessionData?.some((s: any) => s.messages && s.messages.length > 0) || false,
     lessonType: data.lessonType
   });
 
-  const results = {
+  const results: StorageResults = {
     mongodb: { success: false, error: null },
     firebase: { success: false, error: null },
     overallSuccess: false
@@ -70,10 +83,10 @@ export async function saveExperimentData(data: any) {
         }
         
         const result = await response.json();
-        results.mongodb = { success: true, data: result };
+        results.mongodb = { success: true, error: null, data: result };
         console.log('✅ Successfully saved to MongoDB');
       }, 3); // 3 retries
-    } catch (error) {
+    } catch (error: unknown) {
       results.mongodb = { success: false, error };
       console.error('❌ Failed to save to MongoDB after retries:', error);
     }
@@ -115,10 +128,10 @@ export async function saveExperimentData(data: any) {
           throw new Error(result.message || 'Firebase server save failed');
         }
         
-        results.firebase = { success: true, data: result };
+        results.firebase = { success: true, error: null, data: result };
         console.log('✅ Successfully saved to Firebase via secure Admin SDK');
       }, 3); // 3 retries
-    } catch (error) {
+    } catch (error: unknown) {
       results.firebase = { success: false, error };
       console.error('❌ Failed to save to Firebase after retries:', error);
       
@@ -142,7 +155,7 @@ export async function saveExperimentData(data: any) {
         const firebaseResult = await saveDataToFirebase(payload);
         
         if (firebaseResult.success) {
-          results.firebase = { success: true, data: firebaseResult };
+          results.firebase = { success: true, error: null, data: firebaseResult };
           console.log('✅ Successfully saved to Firebase via client fallback');
         }
       } catch (fallbackError) {
