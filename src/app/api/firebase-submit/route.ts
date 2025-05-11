@@ -4,7 +4,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 // Proper Firebase Admin SDK initialization that handles multiple calls safely
 let app;
-const FIREBASE_APP_NAME = 'experiment-data-app';
+const FIREBASE_APP_NAME = 'math-data-app';
 
 try {
   // Check if any Firebase apps are already initialized
@@ -35,7 +35,7 @@ try {
 
 // Get Firestore instance
 const db = getFirestore(app);
-const collectionName = 'experiment_data';
+const collectionName = 'math_data';
 
 // Firebase-specific API endpoint
 export async function POST(request: Request) {
