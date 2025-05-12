@@ -63,6 +63,9 @@ interface SurveyData {
   learningAmount?: string;
   feedback?: string;
   submittedAt?: string;
+  age?: string;
+  gender?: string;
+  educationLevel?: string;
 }
 
 // Flow data structure - everything we track during the flow

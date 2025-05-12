@@ -12,6 +12,9 @@ export interface SurveyDocument extends Document {
     learningAmount?: string;
     feedback?: string;
     submittedAt?: string;
+    age?: string;
+    gender?: string;
+    educationLevel?: string;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -40,7 +43,10 @@ const SurveySchema = new Schema(
       perceivedCorrectness: { type: String },
       learningAmount: { type: String },
       feedback: { type: String },
-      submittedAt: { type: String }
+      submittedAt: { type: String },
+      age: { type: String },
+      gender: { type: String },
+      educationLevel: { type: String }
     }
   },
   { 

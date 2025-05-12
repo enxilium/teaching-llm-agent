@@ -26,7 +26,10 @@ export default function CompletedPage() {
     difficultyLevel: '',
     correctnessPerception: '',
     learningAmount: '',
-    prosAndCons: ''
+    prosAndCons: '',
+    age: '',
+    gender: '',
+    educationLevel: ''
   });
   
   const handleInputChange = (e: { target: { name: any; value: any; }; }) => {
@@ -57,6 +60,9 @@ export default function CompletedPage() {
             perceivedCorrectness: surveyAnswers.correctnessPerception,
             learningAmount: surveyAnswers.learningAmount,
             feedback: surveyAnswers.prosAndCons,
+            age: surveyAnswers.age,
+            gender: surveyAnswers.gender,
+            educationLevel: surveyAnswers.educationLevel,
             submittedAt: new Date().toISOString()
         };
         
@@ -215,6 +221,68 @@ export default function CompletedPage() {
                   className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
                   placeholder="Please share your thoughts on how helpful the lesson was and what could be improved..."
                 />
+              </div>
+              
+              <div>
+                <label className="block mb-2">What is your age?</label>
+                <input
+                  type="number"
+                  name="age"
+                  value={surveyAnswers.age}
+                  onChange={handleInputChange}
+                  required
+                  min="18"
+                  max="100"
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
+                  placeholder="Enter your age..."
+                />
+              </div>
+              
+              <div>
+                <label className="block mb-2">What is your gender?</label>
+                <select 
+                  name="gender" 
+                  value={surveyAnswers.gender}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
+                >
+                  <option value="">Select an option</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other (please specify)</option>
+                  <option value="prefer_not_to_answer">Prefer not to answer</option>
+                </select>
+                {surveyAnswers.gender === 'other' && (
+                  <input
+                    type="text"
+                    name="genderSpecify"
+                    onChange={(e) => setSurveyAnswers(prev => ({...prev, gender: `other: ${e.target.value}`}))}
+                    required
+                    className="w-full mt-2 p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
+                    placeholder="Please specify..."
+                  />
+                )}
+              </div>
+              
+              <div>
+                <label className="block mb-2">Highest level of education completed</label>
+                <select 
+                  name="educationLevel" 
+                  value={surveyAnswers.educationLevel}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
+                >
+                  <option value="">Select an option</option>
+                  <option value="high_school">High School</option>
+                  <option value="some_college">Some College</option>
+                  <option value="associates">Associate's Degree</option>
+                  <option value="bachelors">Bachelor's Degree</option>
+                  <option value="masters">Master's Degree</option>
+                  <option value="doctorate">Doctorate or Professional Degree</option>
+                  <option value="other">Other</option>
+                </select>
               </div>
               
               <button
