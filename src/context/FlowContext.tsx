@@ -345,15 +345,40 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     
     // Update state with atomic operation
     setFlowData(prev => {
-      const updatedData = {
-        ...prev,
-        sessionData: [...(prev.sessionData || []), {
+      // Check if we already have an entry for this question
+      const existingEntryIndex = prev.sessionData?.findIndex(
+        (entry) => entry.questionId === sessionData.questionId
+      );
+      
+      let updatedSessionData;
+      
+      if (existingEntryIndex >= 0) {
+        // Update the existing entry instead of adding a new one
+        console.log(`💾 Updating existing session data for question ${sessionData.questionId}`);
+        updatedSessionData = [...(prev.sessionData || [])];
+        updatedSessionData[existingEntryIndex] = {
           ...sanitizedSessionData,
           userId,
-          lessonType: lessonType, // Ensure lessonType is included
-          hitId: hitId, // Ensure hitId is included
-          _savedAt: new Date().toISOString() // Add timestamp for tracking
-        }]
+          lessonType: lessonType,
+          hitId: hitId,
+          _savedAt: new Date().toISOString(),
+          _updated: true // Mark as updated for debugging
+        };
+      } else {
+        // Add a new entry
+        console.log(`💾 Adding new session data for question ${sessionData.questionId}`);
+        updatedSessionData = [...(prev.sessionData || []), {
+          ...sanitizedSessionData,
+          userId,
+          lessonType: lessonType,
+          hitId: hitId,
+          _savedAt: new Date().toISOString()
+        }];
+      }
+      
+      const updatedData = {
+        ...prev,
+        sessionData: updatedSessionData
       };
       
       // Immediately update localStorage for resilience

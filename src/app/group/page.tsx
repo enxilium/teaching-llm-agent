@@ -28,6 +28,14 @@ interface AIResponse {
   [key: string]: any; // For any other unexpected properties
 }
 
+// Interface for agent prompts loaded from JSON
+interface Agent {
+  id: string;
+  name: string;
+  avatar: string;
+  systemPrompt: string;
+}
+
 // Helper function to process text with math expressions
 const formatMathExpression = (text: string) => {
     if (!text) return text;
@@ -57,92 +65,8 @@ const formatMathExpression = (text: string) => {
     return text;
 };
 
-// Define the AI agents with their specific learning gaps
-const agents = [
-    {
-        id: 'concept',
-        name: 'Concept Gap',
-        avatar: 'logic_avatar.png',
-        systemPrompt: `You are Concept Gap, a student who's excellent at calculations and procedural steps but struggles with deeper mathematical concepts.
-As a fellow classmate in a study group:
-
-IMPORTANT: You MUST make conceptual errors in your problem-solving. You consistently misunderstand mathematical concepts, apply formulas in the wrong context, or confuse similar concepts.
-
-- You're confident about your arithmetic: "The answer is definitely 144 because 8 × 3 × 3 × 2 gives us 144"
-- You MUST misapply at least one key concept in your solution (e.g., using permutations when combinations are needed, applying the wrong formula, etc.)
-- When conceptual questions arise, you sound confused: "Wait, why are we using combinations here instead of permutations?"
-- You focus on the "how" not the "why": "These are the steps I followed to get the answer..."
-- You often ask others: "Can someone explain WHY this formula works?" or "I got the right answer, but I'm confused about what it means"
-- You ONLY acknowledge conceptual confusion after someone else points them out
-
-Your strengths (be confident about these):
-- Arithmetic calculations (you're confident your calculations are correct)
-- Following procedural steps precisely
-- Getting numerical answers through methodical work
-
-Your weaknesses (but you don't realize these until others point them out):
-- Understanding underlying concepts
-- Explaining WHY formulas work
-- Connecting mathematical ideas to real-world situations
-
-CRITICAL MATH FORMATTING INSTRUCTIONS:
-1. ALL mathematical expressions MUST be enclosed in LaTeX delimiters with single $ symbols
-2. NEVER write math expressions without proper LaTeX formatting
-3. Examples of proper formatting:
-   - Use $2^3$ instead of 2³ or 2^3
-   - Use $\\frac{1}{2}$ instead of 1/2
-   - Use $\\sqrt{x}$ instead of √x
-   - Use $\\times$ instead of × or x
-4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
-5. Never use double $$ delimiters
-6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
-
-IMPORTANT: Don't correct your own conceptual misunderstandings unless someone else points them out first. You believe your approach is correct until proven otherwise.`
-    },
-    {
-        id: 'arithmetic',
-        name: 'Arithmetic Gap',
-        avatar: 'pattern_avatar.png',
-        systemPrompt: `You are Arithmetic Gap, a student who deeply understands mathematical concepts but frequently makes calculation errors without realizing it.
-As a fellow classmate in a study group:
-
-IMPORTANT: You MUST make arithmetic errors in your problem-solving. Your calculations, numerical work, or algebraic manipulations should contain mistakes.
-
-- You're confident about concepts: "This is definitely a combination problem because order doesn't matter when selecting committees"
-- You explain ideas clearly: "The key insight is that we need to account for the constraint that..."
-- You MUST include at least one arithmetic error in your calculations (e.g., adding numbers incorrectly, forgetting to simplify, incorrectly multiplying, etc.)
-- You make calculation errors without noticing: "So I get 156 as the final answer" (when the correct answer might be 144)
-- You focus on the "why" more than the "how": "The reason we approach it this way is because..."
-- You ONLY acknowledge calculation errors when someone else points them out
-
-Your strengths (be confident about these):
-- Conceptual understanding (you grasp the "why" behind problems)
-- Explaining mathematical ideas in intuitive ways
-- Seeing connections between different topics
-- Identifying which approach to use
-
-Your weaknesses (but you don't realize these until others point them out):
-- Making careless arithmetic errors
-- Mixing up numbers during calculation
-- Getting the final answer wrong despite understanding the approach
-
-CRITICAL MATH FORMATTING INSTRUCTIONS:
-1. ALL mathematical expressions MUST be enclosed in LaTeX delimiters with single $ symbols
-2. NEVER write math expressions without proper LaTeX formatting
-3. Examples of proper formatting:
-   - Use $2^3$ instead of 2³ or 2^3
-   - Use $\\frac{1}{2}$ instead of 1/2
-   - Use $\\sqrt{x}$ instead of √x
-   - Use $\\times$ instead of × or x
-4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
-5. Never use double $$ delimiters
-6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
-
-IMPORTANT: Don't correct your own calculation errors unless someone else points them out first. You believe your numerical answers are correct until proven otherwise.`
-    }
-];
+// Define a variable for agents that will be loaded from JSON
+const agents: Agent[] = [];
 
 export default function PeerOnlyPage() {
     const router = useRouter();
@@ -200,6 +124,53 @@ export default function PeerOnlyPage() {
     // Add a messageStateRef to track message state outside of React rendering
     const messageStateRef = useRef<Message[]>([]);
 
+    // Add state for loading prompts
+    const [promptsLoaded, setPromptsLoaded] = useState(false);
+    
+    // Load agent prompts from JSON file
+    useEffect(() => {
+        const loadPrompts = async () => {
+            try {
+                const response = await fetch('/prompts/group.json');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch agent prompts');
+                }
+                
+                const data = await response.json();
+                if (data.agents && Array.isArray(data.agents)) {
+                    // Clear agents array and add loaded agents
+                    agents.length = 0;
+                    data.agents.forEach((agent: Agent) => {
+                        agents.push(agent);
+                    });
+                    console.log(`Loaded ${agents.length} agent prompts`);
+                    setPromptsLoaded(true);
+                } else {
+                    throw new Error('Invalid prompts data format');
+                }
+            } catch (error) {
+                console.error("Error loading agent prompts:", error);
+                // Provide fallback prompts if loading fails
+                agents.length = 0;
+                agents.push({
+                    id: 'concept',
+                    name: 'Concept Gap',
+                    avatar: 'logic_avatar.png',
+                    systemPrompt: 'You are Concept Gap, a student who is good at calculations but struggles with concepts. Make conceptual errors.'
+                });
+                agents.push({
+                    id: 'arithmetic',
+                    name: 'Arithmetic Gap',
+                    avatar: 'pattern_avatar.png',
+                    systemPrompt: 'You are Arithmetic Gap, a student who understands concepts but makes calculation errors. Make arithmetic errors.'
+                });
+                setPromptsLoaded(true);
+            }
+        };
+        
+        loadPrompts();
+    }, []);
+
     // Update the setMessages calls to also update our ref
     const updateMessages = (newMessages: Message[] | ((prev: Message[]) => Message[])) => {
         // First apply the update to the state
@@ -215,6 +186,13 @@ export default function PeerOnlyPage() {
             return nextMessages;
         });
     };
+
+    // Only continue with rest of component when prompts and questions are loaded
+    useEffect(() => {
+        if (promptsLoaded && loadedQuestions) {
+            startNewRound();
+        }
+    }, [promptsLoaded, loadedQuestions]);
 
     const getQuestionText = (question: any): string => {
         if (typeof question === 'string') return question;
@@ -1026,23 +1004,36 @@ export default function PeerOnlyPage() {
             // Build different prompts based on whether this is a first or second responder
             let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
             
+            // Get the most recent conversation context (up to 5 messages)
+            const recentMessages = messages.slice(-5);
+            const conversationContext = recentMessages.map(msg => {
+                let sender = msg.sender === 'user' ? 'Student' : (
+                    agents.find(a => a.id === msg.agentId)?.name || 'AI'
+                );
+                return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+            }).join('\n\n');
+
+            // Add recent conversation context if there are previous messages
+            if (recentMessages.length > 0) {
+                promptText += `Here's the recent conversation context:\n${conversationContext}\n\n`;
+            }
+            
             if (previousResponseId === null) {
                 // First responder
                 promptText += `The student just asked: "${userQuestion}"\n\n`;
-                promptText += `As ${agent.name}, respond to the student's question. Remember your character traits (strong calculations but conceptual gaps, or strong concepts but calculation errors).`;
+                promptText += `As ${agent.name}, respond to the student's question with your unique perspective. Reference specific points from the conversation history if relevant. Remember your character traits (strong calculations but conceptual gaps, or strong concepts but calculation errors).`;
             } else {
                 // Second responder - read the first response
                 const previousResponse = messages.find(msg => msg.id === previousResponseId);
                 if (previousResponse && typeof previousResponse.text === 'string') {
                     const responderName = agents.find(a => a.id === previousResponse.agentId)?.name || "another student";
-                    let sender = responderName;
                     promptText += `The student just asked: "${userQuestion}"\n\n`;
                     promptText += `${responderName} responded: "${previousResponse.text}"\n\n`;
-                    promptText += `As ${agent.name}, add your own perspective to this discussion. You can agree, disagree, or build on what ${responderName} said. Remember your character traits.`;
+                    promptText += `As ${agent.name}, add your own perspective to this discussion. You MUST explicitly acknowledge and build on what ${responderName} said. You can agree, disagree, or extend their points, but make your response feel like a natural continuation of the conversation. Remember your character traits.`;
                 } else {
                     // Fallback if previous response isn't found
                     promptText += `The student just asked: "${userQuestion}"\n\n`;
-                    promptText += `As ${agent.name}, respond to the student's question. Remember your character traits.`;
+                    promptText += `As ${agent.name}, respond to the student's question while maintaining the flow of conversation. Reference specific points from the prior discussion if possible. Remember your character traits.`;
                 }
             }
             

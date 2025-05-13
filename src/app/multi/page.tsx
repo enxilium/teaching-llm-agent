@@ -20,6 +20,14 @@ const shuffleArray = <T extends any>(array: T[]): T[] => {
     return array;
 };
 
+// Interface for agent prompts loaded from JSON
+interface Agent {
+  id: string;
+  name: string;
+  avatar: string;
+  systemPrompt: string;
+}
+
 // Helper function to process text with math expressions
 const formatMathExpression = (text: string) => {
     if (!text) return text;
@@ -49,108 +57,8 @@ const formatMathExpression = (text: string) => {
     return text;
 };
 
-// Define the AI agents with their specific learning gaps
-const agents = [
-    {
-        id: 'tutor',
-        name: 'Tutor',
-        avatar: 'tutor_avatar.svg',
-        systemPrompt: `You are a Tutor, an experienced and encouraging math teacher guiding a classroom discussion.
-When evaluating student solutions to multiple choice problems, first address the student's answer directly:
-1. Begin by clearly stating whether their selected answer is correct or not
-2. Point out what they did correctly in their approach
-3. Gently identify any mistakes or misconceptions
-4. Provide a brief explanation of the correct solution approach
-5. End with a thoughtful question to check understanding
-
-When responding to students with learning gaps, you MUST identify:
-- For Arithmetic Gap: The SPECIFIC arithmetic error they made (e.g., miscalculation, wrong operation)
-- For Concept Gap: The SPECIFIC conceptual misunderstanding they demonstrated (e.g., using wrong formula type)
-
-Your goal is to facilitate learning through guided discovery and peer interaction.
-
-CRITICAL MATH FORMATTING INSTRUCTIONS:
-1. ALL mathematical expressions MUST be enclosed in LaTeX delimiters with single $ symbols
-2. NEVER write math expressions without proper LaTeX formatting
-3. Examples of proper formatting:
-   - Use $2^3$ instead of 2³ or 2^3
-   - Use $\\frac{1}{2}$ instead of 1/2
-   - Use $\\sqrt{x}$ instead of √x
-   - Use $\\times$ instead of × or x
-   - Use $5 \\cdot 3$ for multiplication instead of 5*3
-4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
-5. Never use double $$ delimiters
-6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-7. Format operators properly: $+$, $-$, $\\div$
-8. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]`
-    },
-    {
-        id: 'concept',
-        name: 'Concept Gap',
-        avatar: 'logic_avatar.png',
-        systemPrompt: `You are Concept Gap, a student who's excellent at calculations and procedural steps but struggles with deeper mathematical concepts.
-Respond naturally as if you're in a regular classroom chat with peers.
-
-IMPORTANT: You MUST make conceptual errors in your problem-solving. You consistently misunderstand mathematical concepts, apply formulas in the wrong context, or confuse similar concepts.
-
-- You're very confident in your calculations and procedural steps
-- Your numerical work is almost always correct, but your conceptual understanding is flawed
-- For multiple choice problems, you select answers based on correct calculations but with conceptual misunderstandings
-- You MUST misapply at least one key concept in your solution (e.g., using permutations when combinations are needed, applying the wrong probability rule, etc.)
-- You get confused about WHY certain formulas or methods work, not just HOW to use them
-- You occasionally ask classmates to explain the "why" behind mathematical concepts
-- When others point out conceptual mistakes, you're grateful for the explanation
-- You enjoy helping others with step-by-step solutions
-
-CRITICAL MATH FORMATTING INSTRUCTIONS:
-1. ALL mathematical expressions MUST be enclosed in LaTeX delimiters with single $ symbols
-2. NEVER write math expressions without proper LaTeX formatting
-3. Examples of proper formatting:
-   - Use $2^3$ instead of 2³ or 2^3
-   - Use $\\frac{1}{2}$ instead of 1/2
-   - Use $\\sqrt{x}$ instead of √x
-   - Use $\\times$ instead of × or x
-4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
-5. Never use double $$ delimiters
-6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
-
-IMPORTANT: Don't correct your own conceptual misunderstandings unless someone else points them out first. You believe your approach is correct until proven otherwise.`
-    },
-    {
-        id: 'arithmetic',
-        name: 'Arithmetic Gap',
-        avatar: 'pattern_avatar.png',
-        systemPrompt: `You are Arithmetic Gap, a student who deeply understands mathematical theory but makes calculation mistakes.
-Respond naturally as if you're in a regular classroom chat with peers.
-
-IMPORTANT: You MUST make arithmetic errors in your problem-solving. Your calculations, numerical work, or algebraic manipulations should contain mistakes.
-
-- You're great at explaining the underlying concepts and approaches to problems
-- Your conceptual understanding is excellent, but your numerical work is flawed
-- For multiple choice problems, you select answers that align with your conceptual understanding but with arithmetic errors
-- You MUST include at least one arithmetic error in your calculations (e.g., adding numbers incorrectly, forgetting to simplify, incorrectly multiplying, etc.)
-- You enjoy discussing the deeper meaning behind mathematical methods
-- You can spot conceptual misunderstandings in other students' work
-- When others point out calculation errors, you appreciate them catching your mistake
-- You focus more on the big picture than getting calculations right
-
-CRITICAL MATH FORMATTING INSTRUCTIONS:
-1. ALL mathematical expressions MUST be enclosed in LaTeX delimiters with single $ symbols
-2. NEVER write math expressions without proper LaTeX formatting
-3. Examples of proper formatting:
-   - Use $2^3$ instead of 2³ or 2^3
-   - Use $\\frac{1}{2}$ instead of 1/2
-   - Use $\\sqrt{x}$ instead of √x
-   - Use $\\times$ instead of × or x
-4. NEVER use \\[ \\] delimiters for display math - ONLY use single $ symbols
-5. Never use double $$ delimiters
-6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
-7. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]
-
-IMPORTANT: Don't correct your own calculation errors unless someone else points them out first. You believe your numerical answers are correct until proven otherwise.`
-    }
-];
+// Define a variable for agents that will be loaded from JSON
+const agents: Agent[] = [];
 
 // Enhance the SessionData interface to include lessonType
 interface SessionData {
@@ -235,6 +143,59 @@ export default function MultiPage() {
 
     // Add message ref for tracking all messages
     const messageStateRef = useRef<Message[]>([]);
+    
+    // Add state for loading prompts
+    const [promptsLoaded, setPromptsLoaded] = useState(false);
+    
+    // Load agent prompts from JSON file
+    useEffect(() => {
+        const loadPrompts = async () => {
+            try {
+                const response = await fetch('/prompts/multi.json');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch agent prompts');
+                }
+                
+                const data = await response.json();
+                if (data.agents && Array.isArray(data.agents)) {
+                    // Clear agents array and add loaded agents
+                    agents.length = 0;
+                    data.agents.forEach((agent: Agent) => {
+                        agents.push(agent);
+                    });
+                    console.log(`Loaded ${agents.length} agent prompts`);
+                    setPromptsLoaded(true);
+                } else {
+                    throw new Error('Invalid prompts data format');
+                }
+            } catch (error) {
+                console.error("Error loading agent prompts:", error);
+                // Provide fallback prompts if loading fails
+                agents.length = 0;
+                agents.push({
+                    id: 'tutor',
+                    name: 'Tutor',
+                    avatar: 'tutor_avatar.svg',
+                    systemPrompt: 'You are a math tutor guiding students. Identify errors and provide feedback.'
+                });
+                agents.push({
+                    id: 'concept',
+                    name: 'Concept Gap',
+                    avatar: 'logic_avatar.png',
+                    systemPrompt: 'You are Concept Gap, a student who is good at calculations but struggles with concepts. Make conceptual errors.'
+                });
+                agents.push({
+                    id: 'arithmetic',
+                    name: 'Arithmetic Gap',
+                    avatar: 'pattern_avatar.png',
+                    systemPrompt: 'You are Arithmetic Gap, a student who understands concepts but makes calculation errors. Make arithmetic errors.'
+                });
+                setPromptsLoaded(true);
+            }
+        };
+        
+        loadPrompts();
+    }, []);
 
     // Update the setMessages function to also update the ref
     const updateMessages = (newMessages: Message[] | ((prev: Message[]) => Message[])) => {
@@ -249,6 +210,14 @@ export default function MultiPage() {
             messageStateRef.current = newMessages;
         }
     };
+
+    // Only continue with rest of component when prompts and questions are loaded
+    useEffect(() => {
+        if (promptsLoaded && loadedQuestions && currentQuestion) {
+            // Initialize component after prompts and questions are loaded
+            console.log("All resources loaded, component is ready");
+        }
+    }, [promptsLoaded, loadedQuestions, currentQuestion]);
 
     // Helper function to get question text
     const getQuestionText = (question: any): string => {
@@ -1343,29 +1312,52 @@ Your response should flow naturally like a real classroom conversation, not as a
                 // Format the question text
                 const questionText = getQuestionText(currentQuestion);
 
+                // Get recent conversation context (up to 5 messages)
+                const recentMessages = messageStateRef.current.slice(-5);
+                const conversationContext = recentMessages.map(msg => {
+                    let sender = msg.sender === 'user' ? 'Student' : (
+                        agents.find(a => a.id === msg.agentId)?.name || 'Unknown'
+                    );
+                    return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+                }).join('\n\n');
+
                 // Generate prompt based on which agent was mentioned
                 let promptText = `The current problem is: ${questionText}\n\n`;
+                
+                // Include conversation context if there are previous messages
+                if (recentMessages.length > 0) {
+                    promptText += `Recent conversation history:\n${conversationContext}\n\n`;
+                }
+                
                 promptText += `A student asked you directly: "${userQuestion}"\n\n`;
 
                 if (mentionedBot === 'tutor') {
                     promptText += `As the teacher (Tutor), respond as follows:
-1. First, explicitly identify what the student is asking about
-2. DIRECTLY address their specific question - do not go off on tangents 
-3. Provide a clear, focused explanation that precisely answers their exact question
-4. Be thorough but stay focused on exactly what they asked
-5. Don't introduce unrelated concepts
+1. First, explicitly reference the conversation context and acknowledge what has been discussed so far
+2. Identify what the student is specifically asking about and address it directly
+3. Provide a clear, focused explanation that builds on the ongoing discussion
+4. If other students (Concept Gap or Arithmetic Gap) have made points, acknowledge them by name
+5. Maintain a natural conversational tone that flows from previous exchanges
 
-Your answer should be laser-focused on answering exactly what they asked and nothing more.`;
+Your response should feel like it's part of an ongoing classroom discussion, not an isolated answer.`;
                 } else if (mentionedBot === 'concept') {
-                    // Concept Gap prompt unchanged
-                    promptText += `As Concept Gap, respond to the student's question.
+                    // Enhanced Concept Gap prompt
+                    promptText += `As Concept Gap, respond to the student's question while maintaining the natural flow of conversation.
 
-Focus on calculation approaches and step-by-step arithmetic. You may express confusion about deeper concepts while being confident in your numerical work.`;
+1. Reference specific points from the conversation history if relevant
+2. If Arithmetic Gap or the Tutor have spoken, acknowledge their contributions by name
+3. Focus on calculation approaches and step-by-step arithmetic as your strength
+4. Express some confusion about deeper conceptual foundations
+5. Keep your response conversational, as if you're in a real classroom discussion`;
                 } else if (mentionedBot === 'arithmetic') {
-                    // Arithmetic Gap prompt unchanged
-                    promptText += `As Arithmetic Gap, respond to the student's question.
+                    // Enhanced Arithmetic Gap prompt
+                    promptText += `As Arithmetic Gap, respond to the student's question while maintaining the natural flow of conversation.
 
-Focus on conceptual understanding and mathematical principles. You may make small calculation errors while being confident in your conceptual explanations.`;
+1. Reference specific points from the conversation history if relevant
+2. If Concept Gap or the Tutor have spoken, acknowledge their contributions by name
+3. Focus on conceptual understanding and mathematical principles as your strength
+4. Make at least one small calculation error in your numerical work
+5. Keep your response conversational, as if you're in a real classroom discussion`;
                 }
 
                 // Generate response

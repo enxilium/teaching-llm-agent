@@ -21,6 +21,10 @@ export default function CompletedPage() {
     }
   }, [hasSubmitted]);
   
+  // Add separate state for "other" specifications
+  const [otherGender, setOtherGender] = useState('');
+  const [otherEducation, setOtherEducation] = useState('');
+  
   const [surveyAnswers, setSurveyAnswers] = useState({
     confusionLevel: '',
     difficultyLevel: '',
@@ -51,7 +55,23 @@ export default function CompletedPage() {
     setIsSubmitting(true);
     
     try {
-        console.log("✅ Survey submission initiated with data:", JSON.stringify(surveyAnswers));
+        // Format the gender and education level if "other" was selected
+        let finalGender = surveyAnswers.gender;
+        let finalEducation = surveyAnswers.educationLevel;
+        
+        if (surveyAnswers.gender === 'other' && otherGender) {
+            finalGender = `other: ${otherGender}`;
+        }
+        
+        if (surveyAnswers.educationLevel === 'other' && otherEducation) {
+            finalEducation = `other: ${otherEducation}`;
+        }
+        
+        console.log("✅ Survey submission initiated with data:", JSON.stringify({
+            ...surveyAnswers,
+            gender: finalGender,
+            educationLevel: finalEducation
+        }));
         
         // MAP field names to match database schema - these are already correct
         const formattedSurveyData = {
@@ -61,8 +81,8 @@ export default function CompletedPage() {
             learningAmount: surveyAnswers.learningAmount,
             feedback: surveyAnswers.prosAndCons,
             age: surveyAnswers.age,
-            gender: surveyAnswers.gender,
-            educationLevel: surveyAnswers.educationLevel,
+            gender: finalGender,
+            educationLevel: finalEducation,
             submittedAt: new Date().toISOString()
         };
         
@@ -256,11 +276,12 @@ export default function CompletedPage() {
                 {surveyAnswers.gender === 'other' && (
                   <input
                     type="text"
-                    name="genderSpecify"
-                    onChange={(e) => setSurveyAnswers(prev => ({...prev, gender: `other: ${e.target.value}`}))}
+                    name="otherGender"
+                    value={otherGender}
+                    onChange={(e) => setOtherGender(e.target.value)}
                     required
                     className="w-full mt-2 p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
-                    placeholder="Please specify..."
+                    placeholder="Please specify your gender..."
                   />
                 )}
               </div>
@@ -281,8 +302,19 @@ export default function CompletedPage() {
                   <option value="bachelors">Bachelor's Degree</option>
                   <option value="masters">Master's Degree</option>
                   <option value="doctorate">Doctorate or Professional Degree</option>
-                  <option value="other">Other</option>
+                  <option value="other">Other (please specify)</option>
                 </select>
+                {surveyAnswers.educationLevel === 'other' && (
+                  <input
+                    type="text"
+                    name="otherEducation"
+                    value={otherEducation}
+                    onChange={(e) => setOtherEducation(e.target.value)}
+                    required
+                    className="w-full mt-2 p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
+                    placeholder="Please specify your education level..."
+                  />
+                )}
               </div>
               
               <button

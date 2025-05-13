@@ -20,6 +20,14 @@ interface Question {
     correctAnswer?: string;
 }
 
+// Interface for agent prompts loaded from JSON
+interface Agent {
+  id: string;
+  name: string;
+  avatar: string;
+  systemPrompt: string;
+}
+
 // Helper functions that don't use React hooks (safe to be outside the component)
 // Ensure proper question text helper function 
 const getQuestionText = (question: any): string => {
@@ -64,6 +72,9 @@ const formatTime = (seconds: number): string => {
     return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
 };
 
+// Create a variable to store loaded agent prompt
+let bobPrompt = ""; // This will be populated from JSON
+
 export default function SinglePage() {
     const router = useRouter();
     const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext, lessonType, hitId } = useFlow();
@@ -95,6 +106,8 @@ export default function SinglePage() {
     const [wordCount, setWordCount] = useState(0);
     const [skipTypewriter, setSkipTypewriter] = useState(false);
     const [canSubmit, setCanSubmit] = useState(false); // Add state for tracking if submit button can be enabled
+    const [promptLoaded, setPromptLoaded] = useState(false); // Add state for tracking prompt loading
+    
     const interventionRef = useRef(false);
     const wordThreshold = 750; // Match the 750 word threshold from group page
     const timeThreshold = 30000; // 30 seconds
@@ -105,6 +118,70 @@ export default function SinglePage() {
     // --- REFS ---
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const nextMessageIdRef = useRef(3);
+    // Add a messageStateRef to track message state outside of React rendering
+    const messageStateRef = useRef<Message[]>([]);
+    
+    // Update the setMessages function to also update the ref
+    const updateMessages = (newMessages: Message[] | ((prev: Message[]) => Message[])) => {
+        // First apply the update to the state
+        setMessages(prev => {
+            const nextMessages = typeof newMessages === 'function' 
+                ? newMessages(prev) 
+                : newMessages;
+            
+            // Then update our ref
+            messageStateRef.current = nextMessages;
+            
+            // Return for the actual state update
+            return nextMessages;
+        });
+    };
+
+    // Add this effect to track message changes and update the ref
+    useEffect(() => {
+        // Update messageStateRef whenever messages change
+        messageStateRef.current = messages;
+        console.log(`Messages updated: now has ${messages.length} messages (ref updated)`);
+        
+        if (messages.length > 0) {
+            const lastMsg = messages[messages.length - 1];
+            console.log(`Last message - sender: ${lastMsg.sender}, text preview: ${typeof lastMsg.text === 'string' ? lastMsg.text.substring(0, 30) + '...' : 'non-string'}`);
+        }
+    }, [messages]);
+    
+    // Load Bob's prompt from JSON
+    useEffect(() => {
+        const loadPrompt = async () => {
+            try {
+                const response = await fetch('/prompts/single.json');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch agent prompts');
+                }
+                
+                const data = await response.json();
+                if (data.agents && Array.isArray(data.agents) && data.agents.length > 0) {
+                    // Find Bob's prompt
+                    const bob = data.agents.find((agent: Agent) => agent.id === 'bob');
+                    if (bob && bob.systemPrompt) {
+                        bobPrompt = bob.systemPrompt;
+                        console.log('Loaded Bob prompt from JSON');
+                        setPromptLoaded(true);
+                    } else {
+                        throw new Error('Bob prompt not found in JSON');
+                    }
+                } else {
+                    throw new Error('Invalid prompts data format');
+                }
+            } catch (error) {
+                console.error("Error loading Bob prompt:", error);
+                // Provide fallback prompt if loading fails
+                bobPrompt = "You are a supportive math tutor. Guide the student toward understanding.";
+                setPromptLoaded(true);
+            }
+        };
+        
+        loadPrompt();
+    }, []);
     
     // --- HELPER FUNCTIONS THAT USE HOOKS (must be inside component) ---
     // Function to handle scroll events in the chat container
@@ -179,218 +256,14 @@ export default function SinglePage() {
             handleUserQuestion();
         }
     };
-    
-    // Add a function to check answer correctness
-    const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
-        if (!question || !question.correctAnswer) return false;
-        
-        // Simple string comparison (enhance as needed)
-        const normalizedUserAnswer = userAnswer.trim().toLowerCase();
-        const normalizedCorrectAnswer = question.correctAnswer.trim().toLowerCase();
-        
-        // Check if this is a multiple choice question
-        if (question.options) {
-            // Handle both array and object formats for options
-            if (Array.isArray(question.options)) {
-                // Find which option letter corresponds to the user's answer
-                const optionIndex = question.options.findIndex(
-                    (option: string) => option.trim().toLowerCase() === normalizedUserAnswer
-                );
 
-                if (optionIndex !== -1) {
-                    // Convert index to letter (0 -> A, 1 -> B, etc.)
-                    const userAnswerLetter = String.fromCharCode(65 + optionIndex);
-                    
-                    // If correctAnswer is already a letter, compare directly
-                    if (/^[A-Da-d]$/.test(normalizedCorrectAnswer)) {
-                        return userAnswerLetter.toLowerCase() === normalizedCorrectAnswer;
-                    } 
-                    // If correctAnswer is the full option text, compare user's selected text
-                    else {
-                        return normalizedUserAnswer === normalizedCorrectAnswer;
-                    }
-                }
-            } 
-            // Handle object format like {A: "text", B: "text"}
-            else if (typeof question.options === 'object') {
-                // Try to find which letter key corresponds to the user's answer
-                for (const [key, value] of Object.entries(question.options)) {
-                    if (String(value).trim().toLowerCase() === normalizedUserAnswer) {
-                        // If user's answer matches this option text
-                        // Compare the key with correctAnswer
-                        return key.toLowerCase() === normalizedCorrectAnswer;
-                    }
-                }
-            }
-        }
-        
-        // For non-multiple choice questions or fallback, compare the text directly
-        return normalizedUserAnswer === normalizedCorrectAnswer;
-    };
-
-    // Update saveSessionData to include correctness
-    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
-        try {
-            // Calculate session duration using submission time if available
-            const endTime = submissionTime || new Date();
-            const durationMs = endTime.getTime() - sessionStartTime.getTime();
-            const durationSeconds = Math.floor(durationMs / 1000);
-            
-            // Get the question text
-            const questionText = getQuestionText(currentQuestion);
-            
-            // Check correctness
-            const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
-            
-            // Use placeholder for empty scratchboard
-            const workContent = scratchboardContent.trim() || "[No work shown]";
-            
-            // Log session details including lesson type
-            console.log(`💾 SINGLE [Session Save] Saving for question ${lessonQuestionIndex}, scenario: ${lessonType}`);
-            
-            // Create the session data object 
-            const sessionDataObj = {
-                questionId: lessonQuestionIndex, // Use predetermined lessonQuestionIndex
-                questionText,
-                startTime: sessionStartTime,
-                endTime,
-                duration: durationSeconds,
-                finalAnswer: finalAnswerText,
-                scratchboardContent: workContent,
-                messages: prepareMessagesForStorage(messages),
-                isCorrect,
-                timeoutOccurred: isTimeout,
-                lessonType: lessonType, // Include the lessonType (scenario type)
-                hitId: hitId // Explicitly include hitId from flow context
-            };
-            
-            // Save to flow context
-            saveToFlowContext(sessionDataObj);
-            
-            console.log(`✅ SINGLE [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
-        } catch (error) {
-            console.error(`❌ SINGLE [Session Save] Error saving session data:`, error);
-        }
-    };
-
-    // Timer functionality
+    // Make sure we have loaded prompts and questions before initializing
     useEffect(() => {
-        if (!currentQuestion) return;
-
-        if (hasSubmittedAnswer) {
-            // Post-submission timer logic (countdown)
-            if (timeLeft <= 0) {
-                // Time to move to next page
-                console.log('Discussion time expired - navigating to next page');
-                
-                // Show message about moving on
-                const timeUpMessageId = getUniqueMessageId();
-                setMessages(prev => [
-                    ...prev,
-                    {
-                        id: timeUpMessageId,
-                        sender: 'system',
-                        text: "Time's up! Moving to the next question...",
-                        timestamp: new Date().toISOString()
-                    }
-                ]);
-                
-                // Save session data before navigating
-                setTimeout(() => {
-                    console.log(`💬 SINGLE Saving final session with ${messages.length + 1} messages`);
-                    saveSessionData(finalAnswer.trim() || selectedOption || "No answer specified", false);
-                    
-                    // Navigate after data is saved
-                    setTimeout(() => {
-                        completeLesson();
-                    }, 1000);
-                }, 1000);
-                
-                return;
-            }
-
-            // Continue with normal countdown timer logic
-            if (roundEndedRef.current) return;
-
-            const timerId = setTimeout(() => {
-                setTimeLeft((prevTime) => prevTime - 1);
-            }, 1000);
-
-            return () => clearTimeout(timerId);
-        } else {
-            // Pre-submission timer logic (count up)
-            if (roundEndedRef.current) return;
-
-            // Set up timer to count up
-            const timerId = setTimeout(() => {
-                setTimeElapsed((prevTime) => prevTime + 1);
-            }, 1000);
-            
-            // Enable submit after 10 seconds if not already enabled
-            if (timeElapsed >= 10 && !canSubmitRef.current) {
-                canSubmitRef.current = true;
-                setCanSubmit(true);
-            }
-            
-            return () => clearTimeout(timerId);
+        if (promptLoaded && currentQuestion) {
+            console.log("All resources loaded, component is ready");
         }
-    }, [timeLeft, timeElapsed, hasSubmittedAnswer, currentQuestion]);
+    }, [promptLoaded, currentQuestion]);
     
-    // Add a one-time effect to handle the 10-second submit button delay
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => {
-        console.log("Setting up 10-second timer for submit button");
-        
-        // Set a timeout to enable the submit button after 10 seconds
-        const enableSubmitTimeout = setTimeout(() => {
-            // Check if we still need to enable the button
-            if (!canSubmitRef.current && !hasSubmittedAnswer) {
-                console.log("Force enabling submit button after 10s timeout");
-                canSubmitRef.current = true;
-                setCanSubmit(true);
-            }
-        }, 10000);
-        
-        // Clean up the timeout on unmount
-        return () => clearTimeout(enableSubmitTimeout);
-    }, []); // Empty dependency array - only run once on mount
-
-    // Function to handle timer expiration - only for manually triggered timeouts
-    const handleTimeExpired = () => {
-        console.log('Time expired - auto-submitting current answer');
-
-        // Record submission time
-        setSubmissionTime(new Date());
-
-        // Prevent further edits
-        setIsQuestioningEnabled(false);
-        setHasSubmittedAnswer(true);
-
-        // Use current values, even if empty
-        const submissionText = finalAnswer.trim() || "No answer provided";
-
-        // CHANGE: Remove system message, only keep user message
-        const userTimeoutMessage: Message = {
-            id: getUniqueMessageId(),
-            sender: 'user',
-            text: `My partial answer: ${submissionText}\n\nMy work so far:\n${scratchboardContent}`,
-            timestamp: new Date().toISOString()
-        };
-
-        // Add only user message (no system message)
-        setMessages(prev => {
-            const newMessages = [userTimeoutMessage];
-            console.log(`📝 SINGLE [Message Reset] Timeout submission. New count: ${newMessages.length}`);
-            return newMessages;
-        });
-
-        // Do NOT save session data here - wait until the discussion is complete
-        // This prevents duplicate session data submission
-
-        // Start conversation with Bob about the partial answer
-        startConversation(currentQuestion!, submissionText, scratchboardContent);
-    };
-
     // --- EFFECT HOOKS ---
     // Update the flow stage check to match the multi page approach
     useEffect(() => {
@@ -478,9 +351,165 @@ export default function SinglePage() {
         return () => clearInterval(intervalId);
     }, [hasSubmittedAnswer, isQuestioningEnabled, messages, wordCount, lastMessageTime]);
 
+    // Add timer effect to properly track time and enable submit button
+    useEffect(() => {
+        // Only run timer before submission
+        if (hasSubmittedAnswer || roundEndedRef.current) return;
+        
+        // Set up the counting timer for pre-submission
+        const timerId = setInterval(() => {
+            setTimeElapsed(prev => {
+                const newTime = prev + 1;
+                // Enable submit button after 10 seconds
+                if (newTime >= 10 && !canSubmitRef.current) {
+                    console.log("Timer reached 10 seconds, enabling submit button");
+                    canSubmitRef.current = true;
+                    setCanSubmit(true);
+                }
+                return newTime;
+            });
+        }, 1000);
+        
+        // Create a separate timeout to ensure button is enabled even if timer has issues
+        const enableButtonTimeout = setTimeout(() => {
+            if (!canSubmitRef.current) {
+                console.log("Force enabling submit button via backup timeout");
+                canSubmitRef.current = true; 
+                setCanSubmit(true);
+            }
+        }, 10500);
+        
+        // Clean up timer on unmount or when dependencies change
+        return () => {
+            clearInterval(timerId);
+            clearTimeout(enableButtonTimeout);
+        };
+    }, [hasSubmittedAnswer]); // Don't include timeElapsed here to avoid restart loops
+
+    // Add post-submission countdown timer effect
+    useEffect(() => {
+        // Only run this timer after submission
+        if (!hasSubmittedAnswer || roundEndedRef.current) return;
+        
+        console.log("Starting post-submission countdown timer");
+        
+        // Set up the countdown timer
+        const timerId = setInterval(() => {
+            setTimeLeft(prev => {
+                // When timer reaches zero, handle completion
+                if (prev <= 1) {
+                    console.log("Discussion time expired");
+                    roundEndedRef.current = true;
+                    
+                    // Add time's up message and disable questioning
+                    const timeUpMessageId = getUniqueMessageId();
+                    updateMessages(prev => [
+                        ...prev,
+                        {
+                            id: timeUpMessageId,
+                            sender: 'system',
+                            text: "Time's up! Moving to the next question...",
+                            timestamp: new Date().toISOString()
+                        }
+                    ]);
+                    
+                    setIsQuestioningEnabled(false);
+                    
+                    // SAVE SESSION DATA before navigating
+                    const userAnswerText = finalAnswer.trim() || "No answer provided";
+                    console.log('Saving final session data before completing lesson');
+                    
+                    // Navigate to next stage after saving data
+                    setTimeout(() => {
+                        saveSessionData(userAnswerText, false)
+                            .then(() => {
+                                console.log('Final session data saved, completing lesson');
+                                completeLesson();
+                            })
+                            .catch(error => {
+                                console.error('Error saving session data:', error);
+                                // Still continue even if save fails
+                                completeLesson();
+                            });
+                    }, 1000);
+                    
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        
+        // Clean up timer on unmount or when dependencies change
+        return () => {
+            clearInterval(timerId);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hasSubmittedAnswer, completeLesson]); // Only include the most critical dependencies
+
+    // Add a function to save session data to flow context
+    const saveSessionData = async (finalAnswerText: string, isTimeout: boolean) => {
+        try {
+            // Calculate session duration
+            const endTime = submissionTime || new Date();
+            const durationMs = endTime.getTime() - sessionStartTime.getTime();
+            const durationSeconds = Math.floor(durationMs / 1000);
+            
+            // Get the question text
+            const questionText = currentQuestion?.question || '';
+            
+            // Check if the answer is correct
+            const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
+            
+            // Use messageStateRef to ensure all messages are captured, not just what's in the state
+            const currentMessages = messageStateRef.current;
+            console.log(`💾 SINGLE [Session Save] Using ${currentMessages.length} messages from messageStateRef`);
+            
+            // Process messages using the utility function
+            const cleanedMessages = prepareMessagesForStorage(currentMessages);
+            
+            console.log(`💾 SINGLE [Session Save] Saving data for question ${lessonQuestionIndex}`);
+            console.log(`💾 SINGLE [Session Save] Message count: ${cleanedMessages.length}`);
+            
+            // Save to flow context - use type assertion to avoid TypeScript errors with lessonType
+            saveToFlowContext({
+                questionId: lessonQuestionIndex,
+                questionText,
+                startTime: sessionStartTime,
+                endTime,
+                duration: durationSeconds,
+                finalAnswer: finalAnswerText,
+                scratchboardContent,
+                messages: cleanedMessages,
+                isCorrect,
+                timeoutOccurred: isTimeout,
+                lessonType // Include lessonType in the saved data
+            } as any); // Use type assertion to avoid TypeScript errors
+            
+            console.log(`✅ SINGLE [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
+            return true;
+        } catch (error) {
+            console.error(`❌ SINGLE [Session Save] Error saving session data:`, error);
+            return false;
+        }
+    };
+
+    // Helper function to check if an answer is correct
+    const checkAnswerCorrectness = (userAnswer: string, question: any): boolean => {
+        if (!question) return false;
+        
+        // Check for correctAnswer first, then fall back to answer
+        const correctAnswer = question.correctAnswer || question.answer;
+        if (!correctAnswer) return false;
+        
+        // Simple string comparison for multiple choice options
+        const normalizedUserAnswer = userAnswer.trim().toLowerCase();
+        const normalizedCorrectAnswer = correctAnswer.trim().toLowerCase();
+        
+        return normalizedUserAnswer === normalizedCorrectAnswer;
+    };
+
     // --- AI INTERACTION FUNCTIONS ---
-    // Update Bob's system prompt
-    const bobPrompt = `You are a supportive math tutor. Your role is to guide the student toward a correct and deep understanding of the solution process, rather than simply providing the final answer.
+    /* Update Bob's system prompt
 Context & Instructions:
 1. Maintain a friendly, encouraging tone.
 2. Point out both correct aspects and areas for improvement in student work.
@@ -503,8 +532,8 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
 6. Ensure ALL numbers in calculations use proper LaTeX when in mathematical context
 7. Format operators properly: $+$, $-$, $\\div$
 8. For multi-line equations or display math, use multiple separate $ expressions instead of \\[ \\]`;
-
-    // Add function to count words in messages
+*/
+    // Add a function to count words in messages
     const countWordsInMessages = (messages: Message[]): number => {
         let totalWords = 0;
         
@@ -548,8 +577,8 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
             timestamp: new Date().toISOString()
         };
 
-        // Add both messages to the state
-        setMessages([userAnswerMessage, bobMessage]);
+        // Add both messages to the state using updateMessages
+        updateMessages([userAnswerMessage, bobMessage]);
         
         // Log to ensure messages are created
         console.log(`💾 SINGLE [Messages Created] Initial conversation messages: ${JSON.stringify([userAnswerMessage, bobMessage])}`);
@@ -618,7 +647,7 @@ Keep your tone encouraging and conversational.`;
             );
 
             // Replace typing indicator with actual response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -628,13 +657,16 @@ Keep your tone encouraging and conversational.`;
                     : msg
             ));
 
+            // Add to typing IDs to enable animation
+            setTypingMessageIds(prev => [...prev, messageId]);
+
         } catch (error) {
             console.error("Error generating teacher's initial response:", error);
             
             // Fallback response
             const fallbackText = `Let's look at your answer. I see you selected "${studentAnswer}". Your work shows [analyzing reasoning]. We need to think about this problem in terms of [key concept]. Would you like me to explain why?`;
             
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -643,6 +675,9 @@ Keep your tone encouraging and conversational.`;
                     }
                     : msg
             ));
+            
+            // Add to typing IDs for animation
+            setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
 
@@ -689,7 +724,7 @@ Keep your tone encouraging and conversational.`;
     const triggerBobFeedback = () => {
         const bobId = getUniqueMessageId();
         
-        setMessages(prev => [
+        updateMessages(prev => [
             ...prev,
             {
                 id: bobId,
@@ -718,7 +753,7 @@ Keep your tone encouraging and conversational.`;
             }
         ]);
         
-        generateBobFeedback(bobId, messages);
+        generateBobFeedback(bobId, messageStateRef.current);
     };
 
     // Word Count Intervention - Feedback on discussion
@@ -752,7 +787,7 @@ Use LaTeX notation with $ for math expressions.`;
             );
             
             // Update message
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -768,7 +803,7 @@ Use LaTeX notation with $ for math expressions.`;
             console.error("Error generating Bob's feedback:", error);
             
             // Fallback response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -787,7 +822,7 @@ Use LaTeX notation with $ for math expressions.`;
     const triggerBobBrainstorm = () => {
         const bobId = getUniqueMessageId();
         
-        setMessages(prev => [
+        updateMessages(prev => [
             ...prev,
             {
                 id: bobId,
@@ -827,7 +862,7 @@ Use LaTeX notation with $ for any math expressions.`;
             );
             
             // Update message
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -843,7 +878,7 @@ Use LaTeX notation with $ for any math expressions.`;
             console.error("Error generating Bob's brainstorm:", error);
             
             // Fallback response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -894,8 +929,8 @@ Use LaTeX notation with $ for any math expressions.`;
             timestamp: new Date().toISOString()
         };
 
-        // Add user message immediately with enhanced logging
-        setMessages(prev => {
+        // Add user message immediately with enhanced logging using updateMessages
+        updateMessages(prev => {
             const newMessages = [...prev, userMessage];
             console.log(`📝 SINGLE [Message Added] User message ID ${userMessageId}. Total count: ${newMessages.length}`, 
                        {length: input.length, preview: input.substring(0, 50) + (input.length > 50 ? '...' : '')});
@@ -911,7 +946,7 @@ Use LaTeX notation with $ for any math expressions.`;
             timestamp: new Date().toISOString(),
             onComplete: () => {
                 // Force an update to ensure all messages are captured
-                setMessages(current => {
+                updateMessages(current => {
                     console.log(`📝 SINGLE [Message Completed] Bob response ID ${bobResponseId}. Total count: ${current.length}`);
                     // Return same array but forces React to recognize the update
                     return [...current]; 
@@ -921,7 +956,7 @@ Use LaTeX notation with $ for any math expressions.`;
 
         // Add Bob's placeholder
         setTimeout(() => {
-            setMessages(prev => {
+            updateMessages(prev => {
                 const newMessages = [...prev, bobPlaceholder];
                 console.log(`📝 SINGLE [Message Added] Bob placeholder ID ${bobResponseId}. Total count: ${newMessages.length}`);
                 return newMessages;
@@ -942,28 +977,48 @@ Use LaTeX notation with $ for any math expressions.`;
     // Function to generate Bob's response to a user question
     const generateBobResponse = async (messageId: number, userQuestion: string) => {
         try {
-            // Format all previous messages for context
-            const previousMessages = messages.slice(0, -2);            
+            // Format all previous messages for context - use up to 5 most recent messages
+            const previousMessages = messageStateRef.current.slice(-5);
+            
+            // Create a detailed conversation summary with specific highlights
             const messagesSummary = previousMessages.map(msg => {
                 const sender = msg.sender === 'user' ? 'Student' : 'Teacher (Bob)';
-                return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+                const content = typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text);
+                
+                // Highlight key points from previous exchanges
+                let highlightedContent = content;
+                
+                // For student messages, try to identify questions or confusion points
+                if (msg.sender === 'user') {
+                    // If message has question marks, those are important to highlight
+                    if (content.includes('?')) {
+                        highlightedContent = `[Student question: ${content}]`;
+                    }
+                }
+                
+                return `${sender}: ${highlightedContent}`;
             }).join('\n\n');
             
             // Get the question text
             const questionText = getQuestionText(currentQuestion);
             
-            // Build prompt for Bob's response
+            // Build prompt for Bob's response with enhanced conversation awareness
             let promptText = `The current problem is: ${questionText}\n\n`;
             
             if (messagesSummary) {
                 promptText += `Here's the conversation so far:\n${messagesSummary}\n\n`;
+                promptText += `Based on this specific conversation history, consider:\n- What key points has the student raised?\n- What concepts might they be struggling with?\n- What have you already explained that you can build upon?\n\n`;
             }
             
             promptText += `The student just asked: "${userQuestion}"\n\n`;
-            promptText += `As the teacher (Bob), respond to the student's question. Be helpful, supportive, and clear. 
-Make sure you address their specific question directly. Provide additional insights if relevant, but stay focused on what they're asking.
-End with a question to encourage further thinking or check their understanding.
-Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
+            promptText += `As the teacher (Bob), respond to the student's question in a way that maintains natural conversation flow. Your response should:\n
+1. SPECIFICALLY reference elements from your previous exchanges with phrases like "As we discussed earlier..." or "Building on what you mentioned about..."
+2. Address the student's specific question directly and acknowledge their thought process
+3. Maintain continuity by connecting your new explanations to concepts already covered
+4. Use a consistent, warm teaching personality throughout all your interactions
+5. End with a follow-up question that logically extends from both the student's question and your response
+
+Use LaTeX notation enclosed in $ symbols for all mathematical expressions. Your response should feel like a natural continuation of the ongoing tutorial conversation, not a standalone answer.`;
             
             // Generate response from AI service
             const response = await aiService.generateResponse(
@@ -974,8 +1029,8 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
                 }
             );
             
-            // Update message with response
-            setMessages(prev => prev.map(msg =>
+            // Update message with response using updateMessages
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -992,7 +1047,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
             console.error("Error generating Bob's response:", error);
             
             // Fallback response
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
@@ -1007,91 +1062,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
         }
     };
     
-    // Function to generate final evaluation when time is up
-    const generateEvaluation = async () => {
-        const evaluationId = getUniqueMessageId();
-        
-        // Add system message about time being up
-        const timeUpMessage: Message = {
-            id: getUniqueMessageId(),
-            sender: 'system',
-            text: "Time's up! Let's review the solution together.",
-            timestamp: new Date().toISOString()
-        };
-        
-        // Add placeholder for Bob's evaluation
-        const evaluationPlaceholder: Message = {
-            id: evaluationId,
-            sender: 'ai',
-            agentId: 'bob',
-            text: '...',
-            timestamp: new Date().toISOString()
-        };
-        
-        // Update messages
-        setMessages(prev => [...prev, timeUpMessage, evaluationPlaceholder]);
-        setTypingMessageIds(prev => [...prev, evaluationId]);
-        
-        try {
-            // Format previous messages for context
-            const formattedMessages = messages.map(msg => ({
-                id: msg.id,
-                sender: msg.sender,
-                text: typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)
-            }));
-            
-            // Get the question and correct answer
-            const questionText = getQuestionText(currentQuestion);
-            const correctAnswer = currentQuestion?.answer || currentQuestion?.correctAnswer || "Not specified";
-            
-            // Get the user's final answer
-            const userFinalAnswer = finalAnswer || selectedOption || "No answer provided";
-            
-            // Generate evaluation response
-            const response = await aiService.generateResponse(
-                formattedMessages,
-                {
-                    systemPrompt: `You are Bob, a supportive math tutor.
-                    The student was working on this problem: ${questionText}
-                    The correct answer is: ${correctAnswer}
-                    The student's final answer was: ${userFinalAnswer}
-                    Their work/reasoning: ${scratchboardContent}
-                    
-                    Provide a comprehensive evaluation of their solution:
-                    1. Start by clearly stating whether their answer is correct or not
-                    2. Explain the full correct solution with clear steps
-                    3. Highlight where the student's reasoning was strong
-                    4. Gently point out any misconceptions
-                    5. Summarize key concepts they should remember for similar problems
-                    
-                    Use LaTeX notation for math expressions: $...$ format.`,
-                    model: currentModel
-                }
-            );
-
-            // Update the message with the response
-            setMessages(prev => prev.map(msg => 
-                msg.id === evaluationId 
-                    ? { ...msg, text: response, timestamp: new Date().toISOString() } 
-                    : msg
-            ));
-
-            setEvaluationComplete(true);
-        } catch (error) {
-            console.error("Error generating evaluation:", error);
-            
-            // Provide a fallback response
-            setMessages(prev => prev.map(msg => 
-                msg.id === evaluationId 
-                    ? { ...msg, text: "I'm having trouble evaluating your solution. Let's discuss it together.", timestamp: new Date().toISOString() } 
-                    : msg
-            ));
-            
-            setEvaluationComplete(true);
-        }
-    };
-    
-    // Modify handleSend to work with student-first approach
+    // Modify handleSend to work with student-first approach and use updateMessages
     const handleSend = () => {
         if (typingMessageIds.length > 0) return;
 
@@ -1110,7 +1081,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions.`;
                 timestamp: now.toISOString()
             };
             
-            setMessages([userFinalAnswer]); // Start with just the user's answer
+            updateMessages([userFinalAnswer]); // Start with just the user's answer
             setIsQuestioningEnabled(true); // Enable questioning
             setHasSubmittedAnswer(true); // Mark that the answer has been submitted
             
