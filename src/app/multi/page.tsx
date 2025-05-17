@@ -252,6 +252,18 @@ export default function MultiPage() {
         return id;
     };
 
+    // Helper function to add a message ID to the typing messages state
+    const addTypingMessageId = (messageId: number) => {
+        // Only add if not already in the array
+        if (!typingMessageIds.includes(messageId)) {
+            console.log(`Adding message ${messageId} to typing IDs`);
+            setTypingMessageIds(prev => [...prev, messageId]);
+            lastTypingUpdateRef.current = Date.now();
+        } else {
+            console.log(`Message ${messageId} already in typing IDs, not adding again`);
+        }
+    };
+    
     // Helper for ensuring no typing is in progress
     const ensureNoTypingInProgress = (callback: () => void, maxDelay = 10000) => {
         const startTime = Date.now();
