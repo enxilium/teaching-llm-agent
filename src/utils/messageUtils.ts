@@ -43,6 +43,12 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
         return false;
       }
       
+      // Skip system messages - IMPORTANT NEW FILTER
+      if (msg.sender === 'system') {
+        console.log("Skipping system message:", typeof msg.text === 'string' ? msg.text.substring(0, 30) + '...' : 'non-string message');
+        return false;
+      }
+      
       // Remove messages with onComplete functions (not serializable)
       delete msg.onComplete;
       
@@ -136,9 +142,12 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
   } catch (error) {
     console.error("❌ Error in prepareMessagesForStorage:", error);
     // Return original messages as fallback - CRITICAL FIX: Instead of empty array
-    const fallbackMessages = messages.map((msg, index) => {
+    const fallbackMessages = messages
+      // Also filter out system messages in the fallback path
+      .filter(msg => msg && msg.sender !== 'system')
+      .map((msg, index) => {
       // Apply the same sender name transformation even in fallback path
-      let senderName = String(msg?.sender || 'system');
+      let senderName = String(msg?.sender || 'unknown');
       if (senderName === 'ai' && msg?.agentId) {
         switch(msg.agentId) {
           case 'arithmetic':

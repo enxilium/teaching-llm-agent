@@ -68,6 +68,19 @@ const formatMathExpression = (text: string) => {
 // Define a variable for agents that will be loaded from JSON
 const agents: Agent[] = [];
 
+// Helper function to format message for display (UI only)
+const formatMessageForDisplay = (text: string): string => {
+    if (!text) return text;
+    
+    // Check if message has the reasoning pattern with "No work shown" placeholder
+    if (text.includes('My reasoning:') && text.includes('No work shown')) {
+        // Replace the entire reasoning section with empty string to hide it
+        return text.replace(/\n\nMy reasoning:\n\[No work shown\]/g, '');
+    }
+    
+    return text;
+};
+
 export default function PeerOnlyPage() {
     const router = useRouter();
     const { currentStage, completeLesson, userId, saveSessionData: saveToFlowContext, lessonQuestionIndex, lessonType } = useFlow();
@@ -260,16 +273,25 @@ export default function PeerOnlyPage() {
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
             
-            // Log BEFORE using prepareMessagesForStorage
-            console.log(`⚠️ GROUP [Session Save] Raw messages before processing: ${currentMessages.length}`);
+            // Filter out system messages and "Time's up!" messages
+            const filteredMessages = currentMessages.filter(msg => 
+                msg.sender !== 'system' && 
+                // Also filter out messages with text containing "Time's up!"
+                !(typeof msg.text === 'string' && msg.text.includes("Time's up!"))
+            );
             
-            if (currentMessages.length > 0) {
-                const sampleMessage = currentMessages[0];
-                console.log(`⚠️ GROUP [Session Save] Sample raw message: ID: ${sampleMessage.id}, Sender: ${sampleMessage.sender}, AgentId: ${sampleMessage.agentId || 'none'}, Text: ${typeof sampleMessage.text === 'string' ? (sampleMessage.text.length > 50 ? sampleMessage.text.substring(0, 50) + '...' : sampleMessage.text) : 'non-string content'}`);
+            console.log(`💾 GROUP [Session Save] Filtered out ${currentMessages.length - filteredMessages.length} system messages`);
+            
+            // Log BEFORE using prepareMessagesForStorage
+            console.log(`⚠️ GROUP [Session Save] Messages after filtering: ${filteredMessages.length}`);
+            
+            if (filteredMessages.length > 0) {
+                const sampleMessage = filteredMessages[0];
+                console.log(`⚠️ GROUP [Session Save] Sample filtered message: ID: ${sampleMessage.id}, Sender: ${sampleMessage.sender}, AgentId: ${sampleMessage.agentId || 'none'}, Text: ${typeof sampleMessage.text === 'string' ? (sampleMessage.text.length > 50 ? sampleMessage.text.substring(0, 50) + '...' : sampleMessage.text) : 'non-string content'}`);
             }
             
             // Use prepareMessagesForStorage to properly format messages
-            const cleanedMessages = prepareMessagesForStorage(currentMessages);
+            const cleanedMessages = prepareMessagesForStorage(filteredMessages);
             
             // Save to flow context
             saveToFlowContext({
@@ -599,7 +621,7 @@ export default function PeerOnlyPage() {
         setTimeLeft(90);
         roundEndedRef.current = false;
         
-        // Create the user answer message
+        // Create the user answer message with placeholder for empty work
         const userAnswerMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
@@ -742,11 +764,20 @@ export default function PeerOnlyPage() {
                 promptText += `The correct answer is: ${correctAnswer}\n\n`;
             }
             
+            // Add information about the other agent
+            const otherAgentId = agent.id === 'concept' ? 'arithmetic' : 'concept';
+            const otherAgent = agents.find(a => a.id === otherAgentId);
+            
+            promptText += `You are ${agent.name}, and you'll be discussing this problem with ${otherAgent?.name || 'another student'} who has different strengths and weaknesses than you.\n\n`;
+            
             promptText += `As ${agent.name}, respond to this ${isMultipleChoice ? 'multiple choice ' : ''}problem in this format:
-1. If it's multiple choice, start with "I choose option [letter/answer]."
-2. Otherwise, start with "My answer is [your answer]."
-3. Then explain your reasoning process showing your work
-4. Make sure your response maintains your character's traits (calculation skills but conceptual confusion OR conceptual understanding but arithmetic errors)`;
+1. Start by greeting the student with "@User" and naturally express whether you agree or disagree with their answer choice
+2. If it's multiple choice, say "I choose option [letter/answer]."
+3. Otherwise, say "My answer is [your answer]."
+4. Then explain your reasoning process showing your work
+5. Ask a question addressed directly to the student using "@User" at the end of your response
+6. Make sure your response maintains your character's traits (${agent.id === 'concept' ? 'strong calculations but conceptual confusion' : 'strong concepts but arithmetic errors'})
+7. Be aware that you'll be having a conversation with both the user and ${otherAgent?.name || 'another student'}, who has ${agent.id === 'concept' ? 'better conceptual understanding but makes calculation errors' : 'better calculation skills but struggles with concepts'}`;
 
             // Generate response from AI service
             const response = await aiService.generateResponse(
@@ -776,8 +807,8 @@ export default function PeerOnlyPage() {
             
             // Provide a fallback response if there's an error
             const fallbackText = agent.id === 'concept'
-                ? "I choose option B. This is how I solved it: I follow the steps carefully and make sure to calculate each part correctly, though I'm not fully clear on why this specific approach is best."
-                : "I choose option A. This is how I solved it: Looking at the conceptual framework, I identified the key relationship, though I might have made a small calculation error somewhere.";
+                ? "@User I choose option B. This is how I solved it: I follow the steps carefully and make sure to calculate each part correctly, though I'm not fully clear on why this specific approach is best. What do you think about this approach?"
+                : "@User I choose option A. This is how I solved it: Looking at the conceptual framework, I identified the key relationship, though I might have made a small calculation error somewhere. Does my reasoning make sense to you?";
             
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
@@ -1004,8 +1035,22 @@ export default function PeerOnlyPage() {
             // Build different prompts based on whether this is a first or second responder
             let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
             
-            // Get the most recent conversation context (up to 5 messages)
-            const recentMessages = messages.slice(-5);
+            // Get the other agent information
+            const otherAgentId = agent.id === 'concept' ? 'arithmetic' : 'concept';
+            const otherAgent = agents.find(a => a.id === otherAgentId);
+            
+            // Get the most recent conversation context (up to 7 messages for more complete context)
+            const recentMessages = messages.slice(-7);
+            
+            // Identify which agents have participated in the conversation
+            const participatingAgents = new Set();
+            recentMessages.forEach(msg => {
+                if (msg.sender === 'ai' && msg.agentId) {
+                    participatingAgents.add(msg.agentId);
+                }
+            });
+            
+            // Format the conversation with clear speaker labels for better context
             const conversationContext = recentMessages.map(msg => {
                 let sender = msg.sender === 'user' ? 'Student' : (
                     agents.find(a => a.id === msg.agentId)?.name || 'AI'
@@ -1018,22 +1063,33 @@ export default function PeerOnlyPage() {
                 promptText += `Here's the recent conversation context:\n${conversationContext}\n\n`;
             }
             
+            // Add information about the other agent
+            promptText += `You are ${agent.name} with ${agent.id === 'concept' ? 'strong calculation skills but conceptual confusion' : 'strong conceptual understanding but arithmetic errors'}. The other participant in this conversation is ${otherAgent?.name || 'another student'} who has ${agent.id === 'concept' ? 'better conceptual understanding but makes calculation errors' : 'better calculation skills but struggles with concepts'}.\n\n`;
+            
             if (previousResponseId === null) {
-                // First responder
-                promptText += `The student just asked: "${userQuestion}"\n\n`;
-                promptText += `As ${agent.name}, respond to the student's question with your unique perspective. Reference specific points from the conversation history if relevant. Remember your character traits (strong calculations but conceptual gaps, or strong concepts but calculation errors).`;
+                // First responder - more natural prompt with awareness of other agent
+                promptText += `The student just said: "${userQuestion}"\n\n`;
+                
+                // Check if the other agent has spoken in this conversation before
+                const otherAgentHasSpoken = Array.from(participatingAgents).includes(otherAgentId);
+                
+                if (otherAgentHasSpoken) {
+                    promptText += `As ${agent.name}, respond to the student's message while being aware of ${otherAgent?.name}'s previous contributions. Address the student with "@User" and refer to ${otherAgent?.name} as "@${otherAgent?.name}" if you're commenting on something they said. Be sure to maintain your character traits (${agent.id === 'concept' ? 'confident with calculations but confused about concepts' : 'strong conceptual understanding but prone to calculation errors'}).`;
+                } else {
+                    promptText += `As ${agent.name}, respond to the student's message with your unique perspective. Address the student directly with "@User" at the beginning of your response. Reference specific points from the conversation history if relevant. Remember your character traits (${agent.id === 'concept' ? 'confident with calculations but confused about concepts' : 'strong conceptual understanding but prone to calculation errors'}).`;
+                }
             } else {
                 // Second responder - read the first response
                 const previousResponse = messages.find(msg => msg.id === previousResponseId);
                 if (previousResponse && typeof previousResponse.text === 'string') {
                     const responderName = agents.find(a => a.id === previousResponse.agentId)?.name || "another student";
-                    promptText += `The student just asked: "${userQuestion}"\n\n`;
+                    promptText += `The student just said: "${userQuestion}"\n\n`;
                     promptText += `${responderName} responded: "${previousResponse.text}"\n\n`;
-                    promptText += `As ${agent.name}, add your own perspective to this discussion. You MUST explicitly acknowledge and build on what ${responderName} said. You can agree, disagree, or extend their points, but make your response feel like a natural continuation of the conversation. Remember your character traits.`;
+                    promptText += `As ${agent.name}, add your own perspective to this discussion. When addressing ${responderName}, use "@${responderName}". When addressing the student, use "@User". You MUST explicitly acknowledge and build on what @${responderName} said. You can agree, politely disagree, or extend their points, but make your response feel like a natural group conversation. Think about how your different strengths and weaknesses (${agent.id === 'concept' ? 'calculation skills vs. conceptual understanding' : 'conceptual understanding vs. calculation accuracy'}) relate to what ${responderName} said.`;
                 } else {
-                    // Fallback if previous response isn't found
-                    promptText += `The student just asked: "${userQuestion}"\n\n`;
-                    promptText += `As ${agent.name}, respond to the student's question while maintaining the flow of conversation. Reference specific points from the prior discussion if possible. Remember your character traits.`;
+                    // Fallback if previous response isn't found - more natural prompt
+                    promptText += `The student just said: "${userQuestion}"\n\n`;
+                    promptText += `As ${agent.name}, respond to the student's message while maintaining the flow of conversation. Address the student directly with "@User" and be ready to engage with ${otherAgent?.name} using "@${otherAgent?.name}" if they've participated. Reference specific points from the prior discussion if possible. Remember your character traits (${agent.id === 'concept' ? 'strong calculations but conceptual gaps' : 'strong concepts but calculation errors'}).`;
                 }
             }
             
@@ -1063,13 +1119,13 @@ export default function PeerOnlyPage() {
         } catch (error) {
             console.error(`Error generating ${agent.name}'s response:`, error);
             
-            // Fallback response
+            // Fallback response - more specific and natural fallbacks
             let fallbackText = '';
             
             if (agent.id === 'concept') {
-                fallbackText = "I think I understand what you're asking. Let me approach this from a calculation perspective...";
+                fallbackText = "@User I think I understand your point. Let me try working through this calculation approach...";
             } else if (agent.id === 'arithmetic') {
-                fallbackText = "That's an interesting question. From a conceptual standpoint...";
+                fallbackText = "@User From a conceptual standpoint, I'd approach it differently. Here's my thinking...";
             }
             
             updateMessages(prev => prev.map(msg =>
@@ -1172,7 +1228,7 @@ export default function PeerOnlyPage() {
         }
     };
 
-    // Updated feedback generation with awareness of previous messages
+    // Updated feedback generation with awareness of previous messages and other agent
     const generateBotFeedback = async (
         messageId: number, 
         agent: any, 
@@ -1180,6 +1236,10 @@ export default function PeerOnlyPage() {
         previousBotMessageId?: number
     ) => {
         try {
+            // Get the other agent information
+            const otherAgentId = agent.id === 'concept' ? 'arithmetic' : 'concept';
+            const otherAgent = agents.find(a => a.id === otherAgentId);
+            
             // Get previous bot's message if available
             let previousBotMessage: Message | undefined;
             let previousBotName: string | undefined;
@@ -1191,7 +1251,7 @@ export default function PeerOnlyPage() {
                 }
             }
             
-            // Format conversation history
+            // Format conversation history with better context
             const messagesSummary = contextMessages.map(msg => {
                 let sender = "Student";
                 if (msg.sender === 'ai') {
@@ -1201,23 +1261,39 @@ export default function PeerOnlyPage() {
                 return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
             }).join('\n\n');
             
+            // Identify which agents have participated in the conversation
+            const participatingAgents = new Set();
+            contextMessages.forEach(msg => {
+                if (msg.sender === 'ai' && msg.agentId) {
+                    participatingAgents.add(msg.agentId);
+                }
+            });
+            const otherAgentHasParticipated = Array.from(participatingAgents).includes(otherAgentId);
+            
             // Build prompt for bot's feedback
             let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
             promptText += `Here's the conversation so far:\n${messagesSummary}\n\n`;
             
+            // Add information about agent roles and relationships
+            promptText += `You are ${agent.name}, who has ${agent.id === 'concept' ? 'strong calculation skills but conceptual confusion' : 'strong conceptual understanding but arithmetic errors'}. The other participant is ${otherAgent?.name}, who has ${agent.id === 'concept' ? 'better conceptual understanding but makes calculation errors' : 'better calculation skills but struggles with concepts'}.\n\n`;
+            
             if (previousBotMessage && previousBotName) {
                 promptText += `${previousBotName} just said: "${previousBotMessage.text}"\n\n`;
-                promptText += `As ${agent.name}, RESPOND TO and BUILD ON what ${previousBotName} just said. `;
+                promptText += `As ${agent.name}, RESPOND TO and BUILD ON what ${previousBotName} said. Begin by addressing them as "@${previousBotName}". When addressing the student, use "@User". Make your response feel like a natural group conversation.`;
+            } else if (otherAgentHasParticipated) {
+                // If the other agent has participated but wasn't the immediate previous speaker
+                promptText += `As ${agent.name}, reflect on the DISCUSSION SO FAR and specifically acknowledge ${otherAgent?.name}'s contributions. Address them as "@${otherAgent?.name}" and address the student as "@User". Highlight how your perspective differs from ${otherAgent?.name}'s based on your different strengths and weaknesses.`;
             } else {
-                promptText += `As ${agent.name}, provide FEEDBACK on the DISCUSSION SO FAR. `;
+                // If the other agent hasn't spoken yet
+                promptText += `As ${agent.name}, reflect on the DISCUSSION SO FAR by highlighting key insights or ideas. When referring to participants in the conversation, use the @ symbol (e.g., "@User" for the student). Be aware that ${otherAgent?.name} might join the conversation later.`;
             }
             
             if (agent.id === 'concept') {
-                promptText += `Show your usual confidence with calculations but possible conceptual confusion.
-Focus on synthesizing the key mathematical steps from the conversation. End with a specific question about WHY a particular approach works.`;
+                promptText += `\n\nShow your usual confidence with calculations but possible conceptual confusion.
+Focus on synthesizing the key mathematical steps from the conversation. If possible, refer to something ${otherAgent?.name} said using "@${otherAgent?.name}". End with a specific question about WHY a particular approach works, addressing it to a specific participant using the @ symbol.`;
             } else if (agent.id === 'arithmetic') {
-                promptText += `Show your usual conceptual understanding but possibly make a minor calculation error.
-Focus on connecting key concepts from the conversation to the broader mathematical principles. End with a specific question about verifying a calculation.`;
+                promptText += `\n\nShow your usual conceptual understanding but possibly make a minor calculation error.
+Focus on connecting key concepts from the conversation to the broader mathematical principles. If possible, refer to something ${otherAgent?.name} said using "@${otherAgent?.name}". End with a specific question about verifying a calculation, addressing it to a specific participant using the @ symbol.`;
             }
             
             // Generate response from AI service
@@ -1242,13 +1318,17 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         }
     };
 
-    // Replace both generateBotBrainstorm implementations with this single version
+    // Updated brainstorm function with better agent awareness
     const generateBotBrainstorm = async (
         messageId: number, 
         agent: any,
         previousBotId?: number
     ) => {
         try {
+            // Get the other agent information
+            const otherAgentId = agent.id === 'concept' ? 'arithmetic' : 'concept';
+            const otherAgent = agents.find(a => a.id === otherAgentId);
+            
             // Get previous bot's message if available
             let previousBotMessage: Message | undefined;
             let previousBotName: string | undefined;
@@ -1260,22 +1340,35 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                 }
             }
             
+            // Check if the other agent has participated in recent conversation
+            const recentMessages = messages.slice(-7);
+            const otherAgentHasSpoken = recentMessages.some(msg => 
+                msg.sender === 'ai' && msg.agentId === otherAgentId
+            );
+            
             const questionText = getQuestionText(currentQuestion);
             
             // Build prompt for bot's brainstorm
             let promptText = `The current problem is: ${questionText}\n\n`;
             
+            // Add information about agent roles and relationships
+            promptText += `You are ${agent.name} with ${agent.id === 'concept' ? 'strong calculation skills but conceptual confusion' : 'strong conceptual understanding but arithmetic errors'}. The other participant is ${otherAgent?.name}, who has ${agent.id === 'concept' ? 'better conceptual understanding but makes calculation errors' : 'better calculation skills but struggles with concepts'}.\n\n`;
+            
             if (previousBotMessage && previousBotName) {
                 promptText += `${previousBotName} just said: "${previousBotMessage.text}"\n\n`;
-                promptText += `As ${agent.name}, RESPOND TO and BUILD ON the idea from ${previousBotName}. Keep it brief and focused.`;
+                promptText += `As ${agent.name}, RESPOND TO and BUILD ON the idea from ${previousBotName}. Start your response by addressing them with "@${previousBotName}". Keep it brief and focused. Your response should complement their strengths and weaknesses with your own.`;
+            } else if (otherAgentHasSpoken) {
+                // If the other agent has participated but wasn't the immediate previous speaker
+                promptText += `The discussion has paused. As ${agent.name}, provide a BRIEF new insight that builds on what ${otherAgent?.name} has previously shared. Make sure to reference ${otherAgent?.name} using "@${otherAgent?.name}" in your response, and address the student as "@User".`;
             } else {
-                promptText += `The discussion has paused. As ${agent.name}, provide a BRIEF new insight or approach to restart the conversation.`;
+                // If the other agent hasn't spoken recently
+                promptText += `The discussion has paused. As ${agent.name}, provide a BRIEF new insight or approach to restart the conversation. Address the student with "@User" to engage them directly. Be aware that ${otherAgent?.name} might join the conversation.`;
             }
             
             if (agent.id === 'concept') {
-                promptText += `\n\nFocus on a SPECIFIC CALCULATION TECHNIQUE that could help. Show your calculation skills but some conceptual uncertainty. Keep it under 3 sentences and end with a direct question to the group.`;
+                promptText += `\n\nFocus on a SPECIFIC CALCULATION TECHNIQUE that could help. Show your calculation skills but some conceptual uncertainty. Keep it brief and end with a direct question to a specific participant using their @ name (either "@User" or "@${otherAgent?.name}").`;
             } else if (agent.id === 'arithmetic') {
-                promptText += `\n\nFocus on a CORE CONCEPT that might be overlooked. Show your conceptual understanding but potentially include a small numerical error. Keep it under 3 sentences and end with a direct question to the group.`;
+                promptText += `\n\nFocus on a CORE CONCEPT that might be overlooked. Show your conceptual understanding but potentially include a small numerical error. Keep it brief and end with a direct question to a specific participant using their @ name (either "@User" or "@${otherAgent?.name}").`;
             }
             
             // Generate response from AI service
@@ -1297,12 +1390,14 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         } catch (error) {
             console.error(`Error generating ${agent.name}'s brainstorm:`, error);
             
-            // Fallback response
+            // Fallback response with appropriate mention of other agent
             let fallbackText = '';
+            const otherAgentName = agent.id === 'concept' ? 'Arithmetic Gap' : 'Concept Gap';
+            
             if (agent.id === 'concept') {
-                fallbackText = "I just had a thought about how we could approach this problem using a different calculation method...";
+                fallbackText = "@User I just had a thought about how we could approach this problem using a different calculation method. @" + otherAgentName + ", what do you think about this approach?";
             } else if (agent.id === 'arithmetic') {
-                fallbackText = "I was thinking about the underlying concept in this problem. What if we look at it from this angle...";
+                fallbackText = "@User I was thinking about the underlying concept in this problem. @" + otherAgentName + ", do you see how this connects to the calculation approach?";
             }
             
             updateMessages(prev => prev.map(msg =>
@@ -1318,9 +1413,9 @@ Focus on connecting key concepts from the conversation to the broader mathematic
         // Fallback response
         let fallbackText = '';
         if (agent.id === 'concept') {
-            fallbackText = "I'm thinking about how we can approach this problem using a different calculation method...";
+            fallbackText = "@User I'm thinking about how we can approach this problem using a different calculation method...";
         } else if (agent.id === 'arithmetic') {
-            fallbackText = "I was considering the underlying concept here. What if we consider it from this angle...";
+            fallbackText = "@User I was considering the underlying concept here. What if we consider it from this angle...";
         }
         
         updateMessages(prev => prev.map(msg =>
@@ -1823,7 +1918,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                                         {typingMessageIds.includes(msg.id) ? (
                                             <TypewriterTextWrapper
                                                 key={`typewriter-${msg.id}`}
-                                                text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                                text={typeof msg.text === 'string' ? formatMessageForDisplay(msg.text) : JSON.stringify(msg.text)}
                                                 speed={20} // Changed from 1 to 20 for slower, more natural typing
                                                 messageId={msg.id}
                                                 skip={skipTypewriter}
@@ -1860,7 +1955,7 @@ Focus on connecting key concepts from the conversation to the broader mathematic
                                             />
                                         ) : (
                                             <div className="whitespace-pre-wrap break-words text-message">
-                                                {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
+                                                {formatMathExpression(typeof msg.text === 'string' ? formatMessageForDisplay(msg.text) : JSON.stringify(msg.text))}
                                             </div>
                                         )}
                                     </div>

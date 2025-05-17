@@ -188,7 +188,9 @@ export default function SoloPage() {
     };
 
     // Modified saveSessionData function
-    const saveSessionDataToFlow = async (finalAnswerText: string, isTimeout: boolean) => {
+    const saveSessionDataToFlow = async (finalAnswerText: string, isTimeout: boolean = false) => {
+        console.log('Saving session data...');
+        
         try {
             // Calculate session duration in seconds
             const endTime = new Date();
@@ -200,9 +202,6 @@ export default function SoloPage() {
             
             // Check if the answer is correct
             const isCorrect = checkAnswerCorrectness(finalAnswerText, currentQuestion);
-            
-            // Use placeholder for empty scratchboard
-            const workContent = scratchboardContent.trim() || "[No work shown]";
             
             // Log details for debugging
             console.log(`💾 SOLO [Session Save] Saving session for question ${lessonQuestionIndex}`);
@@ -218,7 +217,7 @@ export default function SoloPage() {
                 endTime,
                 duration: durationSeconds,
                 finalAnswer: finalAnswerText,
-                scratchboardContent: workContent, // Use placeholder if empty
+                scratchboardContent: scratchboardContent, // Store original content, empty or not
                 messages: [], // Solo mode has no messages
                 isCorrect,
                 timeoutOccurred: isTimeout,
@@ -229,8 +228,10 @@ export default function SoloPage() {
             saveSessionData(sessionDataObj);
             
             console.log(`✅ SOLO [Session Save] Data saved to flow context successfully for question ${lessonQuestionIndex}`);
+            return true;
         } catch (error) {
             console.error(`❌ SOLO [Session Save] Error saving session data:`, error);
+            return false;
         }
     };
 

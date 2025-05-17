@@ -75,6 +75,19 @@ const formatTime = (seconds: number): string => {
 // Create a variable to store loaded agent prompt
 let bobPrompt = ""; // This will be populated from JSON
 
+// Helper function to format message for display (UI only)
+const formatMessageForDisplay = (text: string): string => {
+    if (!text) return text;
+    
+    // Check if message has the reasoning pattern with "No work shown" placeholder
+    if (text.includes('My reasoning:') && text.includes('No work shown')) {
+        // Replace the entire reasoning section with empty string to hide it
+        return text.replace(/\n\nMy reasoning:\n\[No work shown\]/g, '');
+    }
+    
+    return text;
+};
+
 export default function SinglePage() {
     const router = useRouter();
     const { completeLesson, lessonQuestionIndex, currentStage, userId, saveSessionData: saveToFlowContext, lessonType, hitId } = useFlow();
@@ -464,8 +477,17 @@ export default function SinglePage() {
             const currentMessages = messageStateRef.current;
             console.log(`💾 SINGLE [Session Save] Using ${currentMessages.length} messages from messageStateRef`);
             
+            // Filter out any system messages and "Time's up!" messages
+            const filteredMessages = currentMessages.filter(msg => 
+                msg.sender !== 'system' && 
+                // Also filter out messages with text containing "Time's up!"
+                !(typeof msg.text === 'string' && msg.text.includes("Time's up!"))
+            );
+            
+            console.log(`💾 SINGLE [Session Save] Filtered out ${currentMessages.length - filteredMessages.length} system messages`);
+            
             // Process messages using the utility function
-            const cleanedMessages = prepareMessagesForStorage(currentMessages);
+            const cleanedMessages = prepareMessagesForStorage(filteredMessages);
             
             console.log(`💾 SINGLE [Session Save] Saving data for question ${lessonQuestionIndex}`);
             console.log(`💾 SINGLE [Session Save] Message count: ${cleanedMessages.length}`);
@@ -557,7 +579,7 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
         setTimeLeft(90);
         roundEndedRef.current = false;
         
-        // Use placeholder for empty scratchboard
+        // Use placeholder for empty scratchboard (for AI context) but display will be handled separately
         const workContent = scratchpad.trim() || "[No work shown]";
         
         // Create the user answer message
@@ -587,7 +609,7 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
         const bobMessageId = bobMessage.id;
         
         // Generate response
-        generateTeacherInitialResponse(bobMessageId, question, studentAnswer, workContent);
+        generateTeacherInitialResponse(bobMessageId, question, studentAnswer, scratchpad);
     };
 
     // Function to generate teacher's initial response with the new format
@@ -598,55 +620,50 @@ CRITICAL MATH FORMATTING INSTRUCTIONS:
         scratchpad: string
     ) => {
         try {
-            const questionText = getQuestionText(question);
-            const correctAnswer = question.correctAnswer || question.answer || "not provided";
+            const questionText = question.question;
+            const correctAnswer = question.correctAnswer || question.answer;
             
-            // Get options if available
-            const options = question.options || [];
-            const isMultipleChoice = (Array.isArray(options) && options.length > 0) ||
-                                    (!Array.isArray(options) && Object.keys(options).length > 0);
-
-            // Build prompt for teacher's response
+            // Check if it's a multiple choice question
+            const isMultipleChoice = question.options && 
+                (Array.isArray(question.options) || Object.keys(question.options).length > 0);
+            
+            // Build prompt for teacher's initial response
             let promptText = `The current problem is: ${questionText}\n\n`;
+            promptText += `The correct answer is: ${correctAnswer}\n\n`;
             
             if (isMultipleChoice) {
-                promptText += `This is a multiple choice problem with the following options:\n`;
-                
-                if (Array.isArray(options)) {
-                    options.forEach((option: string, index: number) => {
-                        promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
-                    });
-                } else {
-                    Object.entries(options).forEach(([key, value]) => {
-                        promptText += `${key}. ${value}\n`;
-                    });
-                }
-                promptText += `\n`;
+                promptText += `This is a multiple choice question.\n\n`;
             }
             
-            promptText += `The correct answer is: ${correctAnswer}\n\n`;
-            promptText += `The student selected this answer: ${studentAnswer}\n\n`;
-            promptText += `The student's work: ${scratchpad}\n\n`;
+            promptText += `The student answered: ${studentAnswer}\n\n`;
+            
+            // Check if student provided work or if it's empty
+            const hasWork = scratchpad && scratchpad.trim() !== "" && scratchpad !== "No work shown";
+            promptText += `The student's work is: ${hasWork ? scratchpad : "[The student didn't show their work]"}\n\n`;
+            
+            promptText += `As Bob, provide your response to the student's answer.
 
-            promptText += `As Bob (the math teacher), provide feedback on the student's ${isMultipleChoice ? 'multiple choice selection' : 'answer'}:
-1. Begin by stating whether their selected answer is correct or not
-2. Acknowledge what they did well in their approach
-3. Point out any misconceptions or errors in their reasoning
-4. Provide a clear explanation of the correct solution approach
-5. End with a question to check understanding or advance their thinking
-
-Keep your tone encouraging and conversational.`;
-
+IMPORTANT GUIDELINES:
+1. Start by addressing the student directly with "@User" 
+2. Respond naturally to their specific answer:
+   - If correct: "That's right!" or "Your answer is correct!" followed by a brief explanation
+   - If partially correct: Acknowledge what they got right before addressing misconceptions
+   - If incorrect: Be encouraging while redirecting them ("I see your approach, but let's consider...")
+3. DO NOT apologize for any mistakes you haven't made
+4. DO NOT say "Great question!" since they haven't asked a question yet
+5. Explain the proper solution clearly and step-by-step
+6. End with a question to engage them further, such as "@User does this approach make sense?" or "@User do you see why that works?"`;
+            
             // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
                     systemPrompt: bobPrompt,
-                    model: currentModel
+                    model: 'gpt-4o-2024-08-06'
                 }
             );
-
-            // Replace typing indicator with actual response
+            
+            // Update message with response
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
@@ -656,15 +673,15 @@ Keep your tone encouraging and conversational.`;
                     }
                     : msg
             ));
-
-            // Add to typing IDs to enable animation
+            
+            // Add to typing messages
             setTypingMessageIds(prev => [...prev, messageId]);
-
+            
         } catch (error) {
             console.error("Error generating teacher's initial response:", error);
             
-            // Fallback response
-            const fallbackText = `Let's look at your answer. I see you selected "${studentAnswer}". Your work shows [analyzing reasoning]. We need to think about this problem in terms of [key concept]. Would you like me to explain why?`;
+            // Improved fallback response
+            const fallbackText = "@User looking at your answer, let me walk through the solution. The key insight for solving this problem is understanding the relationships between the variables. Does my explanation help clarify things?";
             
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
@@ -676,7 +693,7 @@ Keep your tone encouraging and conversational.`;
                     : msg
             ));
             
-            // Add to typing IDs for animation
+            // Add to typing messages even in error case
             setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
@@ -761,23 +778,28 @@ Keep your tone encouraging and conversational.`;
         try {
             // Format conversation history
             const messagesSummary = contextMessages.map(msg => {
-                return `${msg.sender === 'user' ? 'Student' : 'Bob'}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+                const sender = msg.sender === 'user' ? 'Student' : 'Bob';
+                return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
             }).join('\n\n');
             
-            // Build prompt for Bob's feedback - FOCUSED ON CONVERSATION REVIEW
-            let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
+            // Build prompt for feedback
+            let promptText = `The current problem is: ${currentQuestion?.question || '(problem not available)'}\n\n`;
             promptText += `Here's the conversation so far:\n${messagesSummary}\n\n`;
-            promptText += `As the teacher (Bob), provide DETAILED FEEDBACK on the discussion so far. Review what has been discussed and identify both strengths and areas for improvement in the student's understanding.
-
-Specifically:
-1. Highlight one correct idea from the student
-2. Identify one misunderstanding or area that needs clarification
-3. Suggest one strategy to deepen understanding of the problem
-4. End with a specific question that prompts the student to reflect on their approach
-
-Use LaTeX notation with $ for math expressions.`;
             
-            // Generate response
+            promptText += `As Bob, provide feedback on the discussion so far. Analyze the state of the conversation and respond appropriately.
+
+IMPORTANT GUIDELINES:
+1. Start your response by addressing the student with "@User"
+2. DO NOT apologize for mistakes or incorrect answers you haven't given
+3. DO NOT say "great question" if the student hasn't asked a question
+4. DO provide a natural transition to your feedback (e.g., "Let me summarize what we've discussed so far...")
+5. Include:
+   - A brief summary of key points from the conversation
+   - Clarification on any misconceptions you observe
+   - A new hint or perspective that builds on what's been discussed
+6. End with a question that encourages further exploration`;
+            
+            // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
@@ -786,7 +808,7 @@ Use LaTeX notation with $ for math expressions.`;
                 }
             );
             
-            // Update message
+            // Update message with response
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
@@ -797,23 +819,26 @@ Use LaTeX notation with $ for math expressions.`;
                     : msg
             ));
             
-            // Add to typing IDs
+            // Add message to typingMessageIds
             setTypingMessageIds(prev => [...prev, messageId]);
+            
         } catch (error) {
             console.error("Error generating Bob's feedback:", error);
             
-            // Fallback response
+            // Fallback response with improved natural language
+            const fallbackText = "@User let me summarize what we've been discussing. I think we're making progress on understanding the key concepts. What aspect would you like to explore further?";
+            
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
-                        text: "I notice there are a few things we should clarify in our discussion. Let me highlight some key points... [Error generating complete response]. Does that help clarify things?",
+                        text: fallbackText,
                         timestamp: new Date().toISOString()
                     }
                     : msg
             ));
             
-            // Add to typing IDs for animation
+            // Add message to typingMessageIds in error case
             setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
@@ -842,17 +867,32 @@ Use LaTeX notation with $ for math expressions.`;
     // Time-Based Intervention - Brief prompt to restart discussion
     const generateBobBrainstorm = async (messageId: number) => {
         try {
-            const questionText = getQuestionText(currentQuestion);
+            const questionText = currentQuestion?.question || '(problem not available)';
             
-            // Build prompt for Bob's brainstorm - SHORTER and more DIRECT
+            // Build prompt for brainstorm
             let promptText = `The current problem is: ${questionText}\n\n`;
-            promptText += `The discussion has paused. As the teacher (Bob), BRIEFLY introduce ONE new insight or approach to prompt the student to engage with the problem.
-
-Keep your response to 3 sentences maximum and end with a specific, direct question to restart the conversation.
-
-Use LaTeX notation with $ for any math expressions.`;
             
-            // Generate response
+            // Get up to 3 recent messages for context
+            const recentMessages = messages.slice(-3);
+            if (recentMessages.length > 0) {
+                const conversationContext = recentMessages.map(msg => {
+                    const sender = msg.sender === 'user' ? 'Student' : 'Bob';
+                    return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+                }).join('\n\n');
+                
+                promptText += `Recent conversation context:\n${conversationContext}\n\n`;
+            }
+            
+            promptText += `As Bob, there has been a period of inactivity in the conversation. You need to gently restart the discussion by adding a new insight or perspective. 
+
+IMPORTANT:
+1. Start your response by addressing the student with "@User"
+2. DO NOT start with "Great question!" or similar phrases, as the student hasn't asked a question
+3. Instead, use a natural transition like "I notice you're thinking about this..." or "Let me share another approach..."
+4. Keep your response brief (2-3 sentences)
+5. End with a specific question to encourage further thinking`;
+            
+            // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
@@ -861,7 +901,7 @@ Use LaTeX notation with $ for any math expressions.`;
                 }
             );
             
-            // Update message
+            // Update message with response
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
@@ -872,23 +912,26 @@ Use LaTeX notation with $ for any math expressions.`;
                     : msg
             ));
             
-            // Add to typing IDs
+            // Add to typingMessageIds
             setTypingMessageIds(prev => [...prev, messageId]);
+            
         } catch (error) {
             console.error("Error generating Bob's brainstorm:", error);
             
-            // Fallback response
+            // Fallback response - improved version that doesn't assume a question was asked
+            const fallbackText = "@User let me share another perspective on this problem. What if we approach it from this angle?";
+            
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
-                        text: "I just had a thought that might help you understand this problem better... [Error generating complete response]. Does that give you a different perspective?",
+                        text: fallbackText,
                         timestamp: new Date().toISOString()
                     }
                     : msg
             ));
             
-            // Also add to typingMessageIds in error case
+            // Add to typingMessageIds in error case
             setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
@@ -977,48 +1020,33 @@ Use LaTeX notation with $ for any math expressions.`;
     // Function to generate Bob's response to a user question
     const generateBobResponse = async (messageId: number, userQuestion: string) => {
         try {
-            // Format all previous messages for context - use up to 5 most recent messages
-            const previousMessages = messageStateRef.current.slice(-5);
+            // Get recent conversation context
+            const recentMessages = messages.slice(-5);
+            let conversationContext = '';
             
-            // Create a detailed conversation summary with specific highlights
-            const messagesSummary = previousMessages.map(msg => {
-                const sender = msg.sender === 'user' ? 'Student' : 'Teacher (Bob)';
-                const content = typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text);
+            if (recentMessages.length > 0) {
+                conversationContext = recentMessages.map(msg => {
+                    const sender = msg.sender === 'user' ? 'Student' : 'Bob';
+                    return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
+                }).join('\n\n');
                 
-                // Highlight key points from previous exchanges
-                let highlightedContent = content;
-                
-                // For student messages, try to identify questions or confusion points
-                if (msg.sender === 'user') {
-                    // If message has question marks, those are important to highlight
-                    if (content.includes('?')) {
-                        highlightedContent = `[Student question: ${content}]`;
-                    }
-                }
-                
-                return `${sender}: ${highlightedContent}`;
-            }).join('\n\n');
-            
-            // Get the question text
-            const questionText = getQuestionText(currentQuestion);
-            
-            // Build prompt for Bob's response with enhanced conversation awareness
-            let promptText = `The current problem is: ${questionText}\n\n`;
-            
-            if (messagesSummary) {
-                promptText += `Here's the conversation so far:\n${messagesSummary}\n\n`;
-                promptText += `Based on this specific conversation history, consider:\n- What key points has the student raised?\n- What concepts might they be struggling with?\n- What have you already explained that you can build upon?\n\n`;
+                conversationContext = `Recent conversation:\n${conversationContext}\n\n`;
             }
             
+            // Build prompt for Bob's response
+            let promptText = `The current problem is: ${currentQuestion?.question || '(problem not available)'}\n\n`;
+            promptText += conversationContext;
             promptText += `The student just asked: "${userQuestion}"\n\n`;
-            promptText += `As the teacher (Bob), respond to the student's question in a way that maintains natural conversation flow. Your response should:\n
-1. SPECIFICALLY reference elements from your previous exchanges with phrases like "As we discussed earlier..." or "Building on what you mentioned about..."
-2. Address the student's specific question directly and acknowledge their thought process
-3. Maintain continuity by connecting your new explanations to concepts already covered
-4. Use a consistent, warm teaching personality throughout all your interactions
-5. End with a follow-up question that logically extends from both the student's question and your response
+            
+            promptText += `As Bob, respond to the student's specific question or comment. 
 
-Use LaTeX notation enclosed in $ symbols for all mathematical expressions. Your response should feel like a natural continuation of the ongoing tutorial conversation, not a standalone answer.`;
+IMPORTANT GUIDELINES:
+1. Start your response by addressing them with "@User"
+2. Respond directly and specifically to what they just asked - don't go off on tangents
+3. If they asked a direct question, answer that specific question
+4. If they made a statement or observation, acknowledge it specifically before adding your thoughts
+5. Provide a clear, helpful explanation
+6. End with a question that invites further engagement and is directly related to the topic they brought up`;
             
             // Generate response from AI service
             const response = await aiService.generateResponse(
@@ -1029,35 +1057,44 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions. Your 
                 }
             );
             
-            // Update message with response using updateMessages
+            // Update message with response
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
                         text: response,
                         timestamp: new Date().toISOString()
-                      }
+                    }
                     : msg
             ));
             
-            // Add to typing message IDs
+            // Add message to typingMessageIds
             setTypingMessageIds(prev => [...prev, messageId]);
             
         } catch (error) {
             console.error("Error generating Bob's response:", error);
             
-            // Fallback response
+            // Create a more specific fallback based on the user's question
+            let fallbackText = "";
+            if (userQuestion.toLowerCase().includes("?")) {
+                // If user asked a question
+                fallbackText = "@User that's a great question. Let me explain...";
+            } else {
+                // If user made a statement
+                fallbackText = "@User I see what you're saying. Here's my perspective...";
+            }
+            
             updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
                         ...msg,
-                        text: "I'm considering your question... [Error generating complete response]. Can you clarify what you're trying to understand?",
+                        text: fallbackText,
                         timestamp: new Date().toISOString()
-                      }
+                    }
                     : msg
             ));
             
-            // Also add to typingMessageIds in error case
+            // Add message to typingMessageIds in error case
             setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
@@ -1074,6 +1111,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions. Your 
             // Use whatever final answer they have, even if empty
             const submissionText = finalAnswer.trim() || selectedOption || "No answer specified";
             
+            // Store placeholder for empty scratchboard (for backend)
             const userFinalAnswer: Message = {
                 id: getUniqueMessageId(),
                 sender: 'user',
@@ -1140,7 +1178,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions. Your 
                             {typingMessageIds.includes(msg.id) ? (
                                 <TypewriterTextWrapper
                                     key={`typewriter-message-${msg.id}`}
-                                    text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                    text={typeof msg.text === 'string' ? formatMessageForDisplay(msg.text) : JSON.stringify(msg.text)}
                                     speed={20}
                                     messageId={msg.id}
                                     skip={skipTypewriter}
@@ -1162,7 +1200,7 @@ Use LaTeX notation enclosed in $ symbols for all mathematical expressions. Your 
                                 />
                             ) : (
                                 <div className="whitespace-pre-wrap break-words text-message">
-                                    {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
+                                    {formatMathExpression(typeof msg.text === 'string' ? formatMessageForDisplay(msg.text) : JSON.stringify(msg.text))}
                                 </div>
                             )}
                         </div>

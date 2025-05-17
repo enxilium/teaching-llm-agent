@@ -75,6 +75,25 @@ interface SessionData {
     lessonType?: string; // Add lessonType as optional field
 }
 
+// Helper function to format message for display (UI only)
+const formatMessageForDisplay = (text: string): string => {
+    if (!text) return text;
+    
+    // Check if message has the reasoning pattern with "No work shown" placeholder
+    if (text.includes('My reasoning:') && text.includes('No work shown')) {
+        // Replace the entire reasoning section with empty string to hide it
+        return text.replace(/\n\nMy reasoning:\n\[No work shown\]/g, '');
+    }
+    
+    // Also handle the "My work so far" pattern for timeout messages
+    if (text.includes('My work so far:') && text.includes('No work shown')) {
+        // Replace the entire work section with empty string to hide it
+        return text.replace(/\n\nMy work so far:\n\[No work shown\]/g, '');
+    }
+    
+    return text;
+};
+
 export default function MultiPage() {
     const router = useRouter();
     const { 
@@ -601,8 +620,17 @@ export default function MultiPage() {
                 }
             });
             
+            // Filter out system messages before further processing 
+            const filteredMessages = currentMessages.filter(msg => 
+                msg.sender !== 'system' && 
+                // Also filter out messages with text containing "Time's up!"
+                !(typeof msg.text === 'string' && msg.text.includes("Time's up!"))
+            );
+            
+            console.log(`💾 MULTI [Session Save] Filtered out ${currentMessages.length - filteredMessages.length} system messages`);
+            
             // Clean and prepare messages for storage
-            const messagesWithFaults = currentMessages.filter(msg => 
+            const messagesWithFaults = filteredMessages.filter(msg => 
                 !msg.id || !msg.sender || !msg.text
             );
             
@@ -610,23 +638,8 @@ export default function MultiPage() {
                 console.warn(`⚠️ MULTI Found ${messagesWithFaults.length} messages with missing properties`);
             }
             
-            // Loop through messages and ensure each has required properties with defaults
-            const cleanedMessages = currentMessages.map(msg => ({
-                id: msg.id || Date.now(),
-                sender: msg.sender || 'unknown',
-                text: typeof msg.text === 'string' ? msg.text : String(msg.text || 'No content'),
-                agentId: msg.agentId || null,
-                timestamp: new Date(msg.timestamp || Date.now()), // Ensure timestamp is a Date object
-            }));
-            
-            // Double check that all messages have required properties
-            const messagesWithoutProperties = cleanedMessages.filter(msg => 
-                !msg.id || !msg.sender || !msg.text || !msg.timestamp
-            );
-            
-            if (messagesWithoutProperties.length > 0) {
-                console.warn(`⚠️ MULTI Found ${messagesWithoutProperties.length} messages with missing properties`);
-            }
+            // Use prepareMessagesForStorage to ensure consistent format
+            const cleanedMessages = prepareMessagesForStorage(filteredMessages);
             
             // Log session details including scenario type
             console.log(`💾 MULTI [Session Save] Saving data for question ${lessonQuestionIndex}, scenario: ${lessonType}`);
@@ -713,7 +726,7 @@ export default function MultiPage() {
         const userTimeoutMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
-            text: `My partial answer: ${submissionText}\n\nMy work so far:\n${scratchboardContent}`,
+            text: `My partial answer: ${submissionText}\n\nMy work so far:\n${scratchboardContent || "No work shown"}`,
             timestamp: new Date().toISOString()
         };
 
@@ -736,7 +749,9 @@ export default function MultiPage() {
         const timeoutMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
-            text: `My partial answer: ${finalAnswer || "No answer provided"}\n\nMy work so far:\n${scratchboardContent || "No work shown"}`,
+            text: scratchboardContent.trim() 
+                ? `My partial answer: ${finalAnswer || "No answer provided"}\n\nMy work so far:\n${scratchboardContent.trim()}`
+                : `My partial answer: ${finalAnswer || "No answer provided"}`,
             timestamp: new Date().toISOString()
         };
         
@@ -798,7 +813,7 @@ export default function MultiPage() {
         setTimeLeft(90);
         roundEndedRef.current = false;
         
-        // Create user answer message
+        // Create user answer message with placeholder for empty work
         const userAnswerMessage: Message = {
             id: getUniqueMessageId(),
             sender: 'user',
@@ -960,23 +975,35 @@ export default function MultiPage() {
     ) => {
         try {
             const questionText = getQuestionText(question);
-            const correctAnswer = typeof currentQuestion === 'object' && currentQuestion.correctAnswer 
-                ? currentQuestion.correctAnswer 
-                : 'not provided';
+            const correctAnswer = typeof question === 'object' && question.correctAnswer 
+                ? question.correctAnswer 
+                : (typeof question === 'object' && question.answer
+                    ? question.answer
+                    : 'not provided');
             
             // Get multiple choice options if available
-            const options = typeof currentQuestion === 'object' && currentQuestion.options 
-                ? currentQuestion.options 
+            const options = typeof question === 'object' && question.options 
+                ? question.options 
                 : [];
+
+            const isMultipleChoice = Array.isArray(options) || (options && Object.keys(options).length > 0);
 
             // Build prompt for peer's initial response
             let promptText = `The current problem is: ${questionText}\n\n`;
 
-            if (options.length > 0) {
-                promptText += `The available answer options are:\n`;
-                options.forEach((option: string, index: number) => {
-                    promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
-                });
+            if (isMultipleChoice) {
+                promptText += `This is a multiple choice problem with the following options:\n`;
+                
+                // Handle both array options and object options
+                if (Array.isArray(options)) {
+                    options.forEach((option, index) => {
+                        promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
+                    });
+                } else if (typeof options === 'object') {
+                    Object.entries(options).forEach(([key, value]) => {
+                        promptText += `${key}. ${value}\n`;
+                    });
+                }
                 promptText += `\n`;
             }
 
@@ -984,11 +1011,20 @@ export default function MultiPage() {
                 promptText += `The correct answer is: ${correctAnswer}\n\n`;
             }
 
-            promptText += `As ${agent.name}, provide your answer to this multiple choice problem in this format:
-1. Start with "I choose option [letter/answer]."
-2. Then explain your reasoning process with "This is how I solved it..."
-3. Show your work and calculations
-4. Make sure your response maintains your character's traits (calculation skills but conceptual confusion OR conceptual understanding but arithmetic errors)`;
+            // Add information about the other agents in the classroom
+            const otherAgents = agents.filter(a => a.id !== agent.id);
+            const tutorAgent = agents.find(a => a.id === 'tutor');
+            
+            promptText += `You are ${agent.name}, participating in a classroom discussion with ${tutorAgent?.name || 'a teacher'} and other students who have different strengths and weaknesses than you.\n\n`;
+            
+            promptText += `As ${agent.name}, provide your response to this ${isMultipleChoice ? 'multiple choice ' : ''}problem in this format:
+1. Begin by addressing the student with "@User" and naturally share your solution
+2. If it's multiple choice, say "I think the answer is [letter/option]."
+3. Otherwise, state "My answer is [your answer]."
+4. Then explain your solution process showing your work
+5. Ask a thoughtful question at the end of your response directed to "@User"
+6. Maintain your character's traits (${agent.id === 'concept' ? 'strong calculations but conceptual gaps' : 'strong concepts but calculation errors'})
+7. Be aware that you'll be having a conversation with both the user and other participants including ${tutorAgent?.name || 'the teacher'}, so prepare to engage with their responses using @ mentions`;
 
             // Generate response from AI service
             const response = await aiService.generateResponse(
@@ -1024,13 +1060,13 @@ export default function MultiPage() {
         } catch (error) {
             console.error(`Error generating ${agent.name}'s initial response:`, error);
 
-            // Fallback response
+            // MODIFIED: More natural fallback responses
             let fallbackText = '';
 
             if (agent.id === 'concept') {
-                fallbackText = "I choose option B. This is how I solved it: I followed the steps carefully and made sure to calculate each part correctly...";
+                fallbackText = "@User I think the answer is B. I solved it by calculating each part step by step... What do you think about this approach?";
             } else if (agent.id === 'arithmetic') {
-                fallbackText = "I choose option A. This is how I solved it: Looking at the conceptual framework, I identified the key relationship between...";
+                fallbackText = "@User I think the answer is A. Looking at the core concept, I approached it by... Does my reasoning make sense to you?";
             }
 
             setMessages(prev => prev.map(msg =>
@@ -1084,10 +1120,11 @@ export default function MultiPage() {
             }
 
             promptText += `As the teacher (Tutor), provide your response in this format:
-1. Start with "The correct answer is [correct answer]."
-2. Explain the proper solution approach in a clear, step-by-step manner
-3. If there are peer responses, provide brief 1-line feedback to each student's approach
-4. End with a question like "Any questions or confusions about this problem?" to encourage further discussion`;
+1. Address the student directly as "@User" at the beginning of your response
+2. Start with "The correct answer is [correct answer]."
+3. Explain the proper solution approach in a clear, step-by-step manner
+4. If there are peer responses, provide brief 1-line feedback to each student's approach by addressing them with "@Concept Gap" or "@Arithmetic Gap"
+5. End with a question like "@User any questions or confusions about this problem?" to encourage further discussion`;
 
             // Generate response from AI service
             const response = await aiService.generateResponse(
@@ -1113,7 +1150,7 @@ export default function MultiPage() {
             console.error("Error generating teacher's initial response:", error);
 
             // Fallback response
-            const fallbackText = `The correct answer is [correct answer]. Let me explain how to solve this step by step... [Error generating complete response]. Any questions or confusions about this problem?`;
+            const fallbackText = `@User the correct answer is [correct answer]. Let me explain how to solve this step by step... [Error generating complete response]. Any questions or confusions about this problem?`;
 
             setMessages(prev => prev.map(msg =>
                 msg.id === messageId
@@ -1140,7 +1177,8 @@ export default function MultiPage() {
         
         // Get options if available
         const options = question?.options || [];
-        const isMultipleChoice = options.length > 0;
+        const isMultipleChoice = Array.isArray(options) && options.length > 0 || 
+            (typeof options === 'object' && Object.keys(options).length > 0);
 
         try {
             // Build prompt for tutor's analysis
@@ -1148,39 +1186,46 @@ export default function MultiPage() {
             
             if (isMultipleChoice) {
                 promptText += `This is a multiple choice problem with the following options:\n`;
-                options.forEach((option: string, index: number) => {
-                    promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
-                });
+                
+                if (Array.isArray(options)) {
+                    options.forEach((option: string, index: number) => {
+                        promptText += `${String.fromCharCode(65 + index)}. ${option}\n`;
+                    });
+                } else if (typeof options === 'object') {
+                    Object.entries(options).forEach(([key, value]) => {
+                        promptText += `${key}. ${value}\n`;
+                    });
+                }
                 promptText += `\n`;
             }
             
             promptText += `The correct answer is: ${correctAnswer}\n\n`;
+            promptText += `The student (User) answered: ${studentAnswer}\n\n`;
             
-            // First analyze the student's answer (keep this part first)
-            promptText += `The student's selected answer was: ${studentAnswer}\n\n`;
-            promptText += `The student's work: ${scratchpad}\n\n`;
+            if (scratchpad && scratchpad !== "No work shown") {
+                promptText += `The student's work was: ${scratchpad}\n\n`;
+            } else {
+                promptText += `The student did not show any work.\n\n`;
+            }
             
-            // Then include peer responses
+            // Include peer responses
             if (peerMessages && peerMessages.length > 0) {
-                promptText += "The other students' responses:\n";
-                peerMessages.forEach(msg => {
-                    const peerName = agents.find(a => a.id === msg.agentId)?.name || 'Student';
-                    promptText += `${peerName}: ${msg.text}\n\n`;
+                promptText += `Here are the other students' responses:\n\n`;
+                
+                peerMessages.forEach(pm => {
+                    const peerName = agents.find(a => a.id === pm.agentId)?.name || pm.agentId;
+                    promptText += `${peerName}: ${pm.text}\n\n`;
                 });
             }
             
-            promptText += `As an experienced and encouraging math teacher, provide feedback on this multiple choice problem in a friendly, conversational tone. Structure your response in a natural way with several paragraphs:
-
-Begin with your assessment of the student's selected answer, acknowledging what they did well while gently identifying any misconceptions.
-
-In your next paragraph, address Arithmetic Gap's approach. You MUST identify the specific arithmetic error they made in their calculations, while acknowledging their conceptual strengths. Be specific about what calculation was performed incorrectly.
-
-Then, discuss Concept Gap's solution. You MUST identify the specific conceptual misunderstanding or error they made in their approach, while acknowledging their procedural skills. Be specific about which concept they misunderstood or misapplied.
-
-End with a thought-provoking question that encourages deeper understanding of the key concepts in this problem.
-
-Your response should flow naturally like a real classroom conversation, not as a rigid evaluation.`;
-
+            // MODIFIED: More natural prompt for tutor analysis
+            promptText += `As the Tutor, provide your analysis of the problem and the student's solution. Please:
+1. Begin by addressing the student directly with "@User"
+2. State the correct answer clearly and concisely
+3. Explain the solution step-by-step, focusing on key concepts and calculations
+4. If other students have responded, briefly address their approaches by mentioning them directly (e.g., "@Concept Gap", "@Arithmetic Gap")
+5. End with an open question to encourage further discussion`;
+            
             // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
@@ -1189,7 +1234,7 @@ Your response should flow naturally like a real classroom conversation, not as a
                     model: 'gpt-4o-2024-08-06'
                 }
             );
-
+            
             // Update message with response
             setMessages(prev => prev.map(msg =>
                 msg.id === messageId
@@ -1201,16 +1246,15 @@ Your response should flow naturally like a real classroom conversation, not as a
                     : msg
             ));
             
-            // Add to typing state for typewriter effect
+            // Add message to typing IDs for animation
             setTypingMessageIds(prev => [...prev, messageId]);
-
+            
         } catch (error) {
             console.error("Error generating tutor analysis:", error);
             
-            // Simple error fallback
-            const fallbackText = `I see you selected "${studentAnswer}". The correct answer is ${correctAnswer}. Looking at your work and comparing it with other approaches, I'd like to offer some insights on how you might think about this problem differently.`;
+            // MODIFIED: More natural fallback response
+            const fallbackText = `@User The correct answer to this problem is ${correctAnswer}. We need to approach this systematically by... What parts of this solution would you like me to explain further?`;
             
-            // Update message with fallback
             setMessages(prev => prev.map(msg =>
                 msg.id === messageId
                     ? {
@@ -1221,7 +1265,7 @@ Your response should flow naturally like a real classroom conversation, not as a
                     : msg
             ));
             
-            // Add to typing IDs even in error case
+            // Add message to typing IDs for animation even in error case
             setTypingMessageIds(prev => [...prev, messageId]);
         }
     };
@@ -1281,155 +1325,132 @@ Your response should flow naturally like a real classroom conversation, not as a
 
     // Fix the generateSingleBotResponse function by retaining the structure
     const generateSingleBotResponse = async (userQuestion: string, mentionedBot: string) => {
-        // Find the mentioned bot
-        const bot = agents.find(a => a.id === mentionedBot);
-        if (!bot) return;
-
-        // Create a placeholder message for the bot
-        const botMessageId = getUniqueMessageId();
-        updateMessages(prev => [
-            ...prev,
-            {
-                id: botMessageId,
-                sender: 'ai',
-                text: '...',
-                agentId: bot.id,
-                timestamp: new Date().toISOString(),
-                onComplete: () => {
-                    // No session save here
-                }
+        // Find the mentioned agent
+        const targetAgent = agents.find(a => a.id === mentionedBot);
+        if (!targetAgent) {
+            console.error(`Bot with ID ${mentionedBot} not found`);
+            return;
+        }
+        
+        // Create a message ID for this response
+        const messageId = getUniqueMessageId();
+        
+        // Add typing indicator for this bot
+        updateMessages(prev => [...prev, {
+            id: messageId,
+            sender: 'ai',
+            agentId: targetAgent.id,
+            text: '...',
+            timestamp: new Date().toISOString(),
+            onComplete: () => {
+                console.log(`${targetAgent.name} response complete`);
             }
-        ]);
-
-        // Add to typing IDs
-        setTypingMessageIds(prev => [...prev, botMessageId]);
-
+        }]);
+        
         try {
-            console.log(`Generating response from ${bot.name}`);
-            setBotThinking(true);
-
-            try {
-                // Format the question text
-                const questionText = getQuestionText(currentQuestion);
-
-                // Get recent conversation context (up to 5 messages)
-                const recentMessages = messageStateRef.current.slice(-5);
-                const conversationContext = recentMessages.map(msg => {
-                    let sender = msg.sender === 'user' ? 'Student' : (
-                        agents.find(a => a.id === msg.agentId)?.name || 'Unknown'
-                    );
+            // Get conversation context (last few messages)
+            const recentMessages = messages.slice(-5);
+            let conversationContext = '';
+            
+            if (recentMessages.length > 0) {
+                conversationContext = recentMessages.map(msg => {
+                    const sender = msg.sender === 'user' ? 'Student' : 
+                        agents.find(a => a.id === msg.agentId)?.name || 'AI';
                     return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
                 }).join('\n\n');
-
-                // Generate prompt based on which agent was mentioned
-                let promptText = `The current problem is: ${questionText}\n\n`;
-                
-                // Include conversation context if there are previous messages
-                if (recentMessages.length > 0) {
-                    promptText += `Recent conversation history:\n${conversationContext}\n\n`;
-                }
-                
-                promptText += `A student asked you directly: "${userQuestion}"\n\n`;
-
-                if (mentionedBot === 'tutor') {
-                    promptText += `As the teacher (Tutor), respond as follows:
-1. First, explicitly reference the conversation context and acknowledge what has been discussed so far
-2. Identify what the student is specifically asking about and address it directly
-3. Provide a clear, focused explanation that builds on the ongoing discussion
-4. If other students (Concept Gap or Arithmetic Gap) have made points, acknowledge them by name
-5. Maintain a natural conversational tone that flows from previous exchanges
-
-Your response should feel like it's part of an ongoing classroom discussion, not an isolated answer.`;
-                } else if (mentionedBot === 'concept') {
-                    // Enhanced Concept Gap prompt
-                    promptText += `As Concept Gap, respond to the student's question while maintaining the natural flow of conversation.
-
-1. Reference specific points from the conversation history if relevant
-2. If Arithmetic Gap or the Tutor have spoken, acknowledge their contributions by name
-3. Focus on calculation approaches and step-by-step arithmetic as your strength
-4. Express some confusion about deeper conceptual foundations
-5. Keep your response conversational, as if you're in a real classroom discussion`;
-                } else if (mentionedBot === 'arithmetic') {
-                    // Enhanced Arithmetic Gap prompt
-                    promptText += `As Arithmetic Gap, respond to the student's question while maintaining the natural flow of conversation.
-
-1. Reference specific points from the conversation history if relevant
-2. If Concept Gap or the Tutor have spoken, acknowledge their contributions by name
-3. Focus on conceptual understanding and mathematical principles as your strength
-4. Make at least one small calculation error in your numerical work
-5. Keep your response conversational, as if you're in a real classroom discussion`;
-                }
-
-                // Generate response
-                const response = await aiService.generateResponse(
-                    [{ id: 1, sender: 'user', text: promptText }],
-                    {
-                        systemPrompt: bot.systemPrompt,
-                        model: currentModel
-                    }
-                );
-
-                // Replace typing indicator with actual response
-                updateMessages(prev => {
-                    const updatedMessages = prev.map(msg =>
-                        msg.id === botMessageId
-                            ? {
-                                ...msg,
-                                text: typeof response === 'string' ? response : JSON.stringify(response),
-                                timestamp: new Date().toISOString()
-                            }
-                            : msg
-                    );
-                    return updatedMessages;
-                });
-
-                // Add to typing state for typewriter effect
-                setTypingMessageIds(prev => [...prev, botMessageId]);
-
-            } catch (error) {
-                console.error(`Error generating ${bot.name}'s response:`, error);
-
-                // Provide character-appropriate fallback
-                let fallbackText = '';
-
-                if (mentionedBot === 'tutor') {
-                    fallbackText = "You're asking specifically about [key aspect of question]. Let me address that directly...";
-                } else if (mentionedBot === 'concept') {
-                    fallbackText = "I think I can help with the calculation part of that. Let me work through the steps... though I'm not fully clear on why this conceptual approach is better.";
-                } else if (mentionedBot === 'arithmetic') {
-                    fallbackText = "From a conceptual standpoint, this problem is about understanding the relationship between the constraints. The key insight is... though I might have made a small error in my arithmetic.";
-                }
-
-                updateMessages(prev => {
-                    const updatedMessages = prev.map(msg =>
-                        msg.id === botMessageId
-                            ? {
-                                ...msg,
-                                text: fallbackText,
-                                timestamp: new Date().toISOString()
-                            }
-                            : msg
-                    );
-                    return updatedMessages;
-                });
-            } finally {
-                setBotThinking(false);
             }
-        } catch (error) {
-            console.error(`Error generating ${bot.name}'s response:`, error);
-            setBotThinking(false);
-            updateMessages(prev => {
-                const updatedMessages = prev.map(msg =>
-                    msg.id === botMessageId
-                        ? {
-                            ...msg,
-                            text: "Sorry, I couldn't generate a response. Please try again.",
-                            timestamp: new Date().toISOString()
-                        }
-                        : msg
-                );
-                return updatedMessages;
+            
+            // Build prompt for this bot's response
+            let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
+            
+            if (conversationContext) {
+                promptText += `Recent conversation:\n${conversationContext}\n\n`;
+            }
+            
+            // Get information about other agents participating in the conversation
+            const otherParticipantIds = new Set<string>();
+            recentMessages.forEach(msg => {
+                if (msg.sender === 'ai' && msg.agentId && msg.agentId !== targetAgent.id) {
+                    otherParticipantIds.add(msg.agentId);
+                }
             });
+            
+            const otherParticipants = Array.from(otherParticipantIds).map(id => 
+                agents.find(a => a.id === id)?.name || id
+            );
+            
+            promptText += `The student just said: "${userQuestion}"\n\n`;
+            
+            // Add context about conversation participants
+            promptText += `This is a classroom discussion with the following participants so far: ${
+                otherParticipants.length > 0 
+                ? 'you, the student (User), and ' + otherParticipants.join(', ')
+                : 'you and the student (User)'
+            }.\n\n`;
+            
+            if (targetAgent.id === 'tutor') {
+                promptText += `As the Tutor, respond to the student's point. Begin with "@User" to address them directly. Focus on being helpful and educational while encouraging deeper mathematical thinking. Address any misconceptions clearly but kindly. 
+                
+If other participants have spoken (Concept Gap or Arithmetic Gap), include specific references to their contributions using @ mentions (like "@Concept Gap" or "@Arithmetic Gap").`;
+            } else if (targetAgent.id === 'concept') {
+                promptText += `As Concept Gap, respond to the student's point. Begin with "@User" to address them directly. Show your character traits of strong calculation abilities but some conceptual confusion. Maintain this persona throughout your response and end with a question that reveals your conceptual uncertainty.
+                
+If the Tutor or Arithmetic Gap have spoken, reference their points using @ mentions (like "@Tutor" or "@Arithmetic Gap") and relate your perspective to theirs.`;
+            } else if (targetAgent.id === 'arithmetic') {
+                promptText += `As Arithmetic Gap, respond to the student's point. Begin with "@User" to address them directly. Show your character traits of strong conceptual understanding but calculation weaknesses. Maintain this persona throughout your response and include a small calculation error while still demonstrating conceptual clarity.
+                
+If the Tutor or Concept Gap have spoken, reference their points using @ mentions (like "@Tutor" or "@Concept Gap") and relate your perspective to theirs.`;
+            }
+            
+            // Generate response
+            const response = await aiService.generateResponse(
+                [{ id: 1, sender: 'user', text: promptText }],
+                {
+                    systemPrompt: targetAgent.systemPrompt,
+                    model: 'gpt-4o-2024-08-06'
+                }
+            );
+            
+            // Update message with response
+            updateMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: response,
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+            
+            // Add to typing message IDs
+            addTypingMessageId(messageId);
+            
+        } catch (error) {
+            console.error(`Error generating ${targetAgent.name}'s response:`, error);
+            
+            // MODIFIED: More natural fallback responses
+            let fallbackText = '';
+            if (targetAgent.id === 'tutor') {
+                fallbackText = "@User That's a good point. Let me explain how this relates to the problem...";
+            } else if (targetAgent.id === 'concept') {
+                fallbackText = "@User I see what you mean. I'd approach this by calculating...";
+            } else {
+                fallbackText = "@User From a conceptual standpoint, I think we should consider...";
+            }
+            
+            // Update message with fallback
+            updateMessages(prev => prev.map(msg =>
+                msg.id === messageId
+                    ? {
+                        ...msg,
+                        text: fallbackText,
+                        timestamp: new Date().toISOString()
+                    }
+                    : msg
+            ));
+            
+            // Add to typing message IDs
+            addTypingMessageId(messageId);
         }
     };
 
@@ -1483,66 +1504,104 @@ Your response should feel like it's part of an ongoing classroom discussion, not
     const generateTutorFeedback = async (messageId: number, agent: any) => {
         try {
             // Format conversation history
-            const messagesSummary = messages.slice(-10).map(msg => {
-                const sender = msg.sender === 'user' ? 'Student' : 
-                               (msg.agentId ? agents.find(a => a.id === msg.agentId)?.name : 'System');
+            const recentMessages = messages.slice(-10);  // Get more context for feedback
+            const conversationContext = recentMessages.map(msg => {
+                let sender = "User";
+                if (msg.sender === 'ai') {
+                    const agentName = agents.find(a => a.id === msg.agentId)?.name || "AI";
+                    sender = agentName;
+                }
                 return `${sender}: ${typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}`;
             }).join('\n\n');
             
-            // Build prompt for tutor's feedback (different from peer feedback)
+            // Build prompt for feedback
             let promptText = `The current problem is: ${getQuestionText(currentQuestion)}\n\n`;
-            promptText += `Here's the recent conversation:\n${messagesSummary}\n\n`;
+            promptText += `Here's the recent conversation:\n${conversationContext}\n\n`;
             
-            promptText += `As the Tutor, provide guidance to refocus the discussion. The conversation has become quite lengthy.
-
-1. Summarize 1-2 key points from the discussion so far
-2. Identify any areas where students may be going off-track
-3. Suggest a specific direction to make progress on the problem
-4. Ask a focused question to guide students toward understanding
-
-Keep your response brief and targeted toward the most important concept that will help students make progress.`;
+            // Get information about other participants in the conversation
+            const participantIds = new Set<string>();
+            recentMessages.forEach(msg => {
+                if (msg.sender === 'ai' && msg.agentId) {
+                    participantIds.add(msg.agentId);
+                }
+            });
             
-            // Generate response from tutor
+            const otherParticipants = Array.from(participantIds)
+                .filter(id => id !== agent.id)
+                .map(id => agents.find(a => a.id === id)?.name || id);
+                
+            // Natural prompts for each agent type with specific mention guidance
+            if (agent.id === 'tutor') {
+                promptText += `As the Tutor, synthesize key points from the discussion so far. Begin by addressing the student with "@User". 
+                
+The following participants have contributed to the discussion: ${otherParticipants.length > 0 ? otherParticipants.join(', ') : 'just you and the student'}.
+                
+IMPORTANT: If Concept Gap or Arithmetic Gap have contributed, you MUST mention them specifically using "@Concept Gap" or "@Arithmetic Gap" when referring to their ideas. Make sure to:
+1. Address at least one specific point raised by each participant
+2. Highlight mathematical insights from the discussion
+3. Clarify any potential confusion points
+4. Pose a focused question to deepen understanding`;
+            } else if (agent.id === 'concept') {
+                promptText += `As Concept Gap, reflect on the mathematical discussion so far. Begin with "@User" to engage the student directly. 
+                
+The following participants have contributed to the discussion: ${otherParticipants.length > 0 ? otherParticipants.join(', ') : 'just you and the student'}.
+                
+IMPORTANT: When referencing others' contributions, use their names with @ symbol (like "@Tutor" or "@Arithmetic Gap"). Make sure to:
+1. Comment on at least one specific point from another participant
+2. Stay in character with strong calculation skills but some conceptual confusion
+3. Ask a question that reveals your conceptual uncertainty`;
+            } else if (agent.id === 'arithmetic') {
+                promptText += `As Arithmetic Gap, share your insights on the discussion so far. Begin with "@User" to address the student directly.
+                
+The following participants have contributed to the discussion: ${otherParticipants.length > 0 ? otherParticipants.join(', ') : 'just you and the student'}.
+                
+IMPORTANT: When referencing others' contributions, use their names with @ symbol (like "@Tutor" or "@Concept Gap"). Make sure to:
+1. Comment on at least one specific point from another participant
+2. Maintain your character traits with strong conceptual understanding but include a minor calculation error
+3. Ask a question that highlights your calculation uncertainty`;
+            }
+            
+            // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
                     systemPrompt: agent.systemPrompt,
-                    model: currentModel
+                    model: 'gpt-4o-2024-08-06'
                 }
             );
             
-            // Update message
-            setMessages(prev => prev.map(msg =>
+            // Update message with response
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
+                    ? { ...msg, text: response, timestamp: new Date().toISOString() }
                     : msg
             ));
             
-            // Add to typing IDs
-            setTypingMessageIds(prev => [...prev, messageId]);
-        } catch (error) {
-            console.error(`Error generating tutor's word count intervention:`, error);
+            // Add to typing message IDs for animation
+            addTypingMessageId(messageId);
             
-            // Fallback response for tutor
-            const fallbackText = "I notice our discussion has covered a lot of ground. Let's refocus on the key aspects of this problem. What specifically are we trying to determine, and what approach would be most efficient?";
+        } catch (error) {
+            console.error(`Error generating ${agent.name}'s feedback:`, error);
+            
+            // MODIFIED: More natural fallback responses
+            let fallbackText = '';
+            if (agent.id === 'tutor') {
+                fallbackText = "@User I want to highlight a few important points from our discussion. In particular...";
+            } else if (agent.id === 'concept') {
+                fallbackText = "@User Based on our conversation, I'm thinking about the calculations differently now...";
+            } else if (agent.id === 'arithmetic') {
+                fallbackText = "@User From a conceptual standpoint, I see several interesting connections in what we've discussed...";
+            }
             
             // Update message with fallback
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: fallbackText,
-                        timestamp: new Date().toISOString()
-                    }
+                    ? { ...msg, text: fallbackText, timestamp: new Date().toISOString() }
                     : msg
             ));
             
-            // Add to typing IDs
-            setTypingMessageIds(prev => [...prev, messageId]);
+            // Add to typing message IDs
+            addTypingMessageId(messageId);
         }
     };
 
@@ -1586,60 +1645,86 @@ Keep your response brief and targeted toward the most important concept that wil
         try {
             const questionText = getQuestionText(currentQuestion);
             
-            // Build prompt for agent's brainstorm - SHORT AND FOCUSED ON NEW IDEAS
+            // Build prompt for brainstorming
             let promptText = `The current problem is: ${questionText}\n\n`;
-            promptText += `The discussion has paused. As ${agent.name}, briefly introduce ONE new insight to restart the conversation.
-
-Keep your response to 3-4 sentences maximum and end with a specific question to engage others.
-
-Be true to your character - ${agent.id === 'concept' ? 'confident in calculations but sometimes confused about deeper concepts' : 'strong on conceptual understanding but prone to arithmetic errors'}.`;
             
-            // Generate response
+            // Get information about other agents who have participated
+            const recentMessages = messages.slice(-7);
+            const participantIds = new Set<string>();
+            
+            recentMessages.forEach(msg => {
+                if (msg.sender === 'ai' && msg.agentId) {
+                    participantIds.add(msg.agentId);
+                }
+            });
+            
+            // Filter out this agent from participants and get their names
+            const otherParticipantIds = Array.from(participantIds).filter(id => id !== agent.id);
+            const otherParticipants = otherParticipantIds.map(id => 
+                agents.find(a => a.id === id)?.name || id
+            );
+            
+            if (agent.id === 'tutor') {
+                promptText += `As the Tutor, notice that the conversation has paused. Provide a helpful insight or hint to restart the discussion.
+                
+Begin by addressing the student with "@User" and if other participants have contributed (${otherParticipants.length > 0 ? otherParticipants.join(', ') : 'none yet'}), reference at least one of their points using @ mentions (like "@Concept Gap" or "@Arithmetic Gap").
+
+Focus on a key aspect of the problem that might help make progress. End with a specific question directed at either the student or one of the other participants.`;
+            } else if (agent.id === 'concept') {
+                promptText += `As Concept Gap, the conversation has paused. Share a calculation approach that might help with the problem.
+                
+Begin by addressing the student with "@User" and if other participants have contributed (${otherParticipants.length > 0 ? otherParticipants.join(', ') : 'none yet'}), reference one of their points using @ mentions (like "@Tutor" or "@Arithmetic Gap").
+
+Show your calculation skills but include some conceptual uncertainty. Keep it brief and end with a direct question to either the student or one of the other participants.`;
+            } else if (agent.id === 'arithmetic') {
+                promptText += `As Arithmetic Gap, the conversation has paused. Share a conceptual insight about the problem that others might have missed.
+                
+Begin by addressing the student with "@User" and if other participants have contributed (${otherParticipants.length > 0 ? otherParticipants.join(', ') : 'none yet'}), reference one of their points using @ mentions (like "@Tutor" or "@Concept Gap").
+
+Show your conceptual understanding but include a minor calculation error. Keep it brief and end with a direct question to either the student or one of the other participants.`;
+            }
+            
+            // Generate response from AI service
             const response = await aiService.generateResponse(
                 [{ id: 1, sender: 'user', text: promptText }],
                 {
                     systemPrompt: agent.systemPrompt,
-                    model: currentModel
+                    model: 'gpt-4o-2024-08-06'
                 }
             );
             
-            // Update message
-            setMessages(prev => prev.map(msg =>
+            // Update message with response
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: response,
-                        timestamp: new Date().toISOString()
-                    }
+                    ? { ...msg, text: response, timestamp: new Date().toISOString() }
                     : msg
             ));
             
-            // Add to typing IDs
-            setTypingMessageIds(prev => [...prev, messageId]);
+            // Add to typing message IDs for animation
+            addTypingMessageId(messageId);
+            
         } catch (error) {
             console.error(`Error generating ${agent.name}'s brainstorm:`, error);
             
-            // Fallback responses based on agent type
+            // MODIFIED: More natural fallback responses
             let fallbackText = '';
-            if (agent.id === 'concept') {
-                fallbackText = "I was thinking about this problem, and I realized we could calculate it using this formula... What do you think about trying this approach?";
+            if (agent.id === 'tutor') {
+                fallbackText = "@User Let's look at this problem from another angle. What if we consider...";
+            } else if (agent.id === 'concept') {
+                fallbackText = "@User I've been thinking about a different way to calculate this. Have you tried...";
             } else {
-                fallbackText = "I was reflecting on the conceptual aspects of this problem, and I think the key insight is... Would that change how we approach this?";
+                fallbackText = "@User From a conceptual perspective, there's an interesting pattern here. Do you notice how...";
             }
             
             // Update message with fallback
-            setMessages(prev => prev.map(msg =>
+            updateMessages(prev => prev.map(msg =>
                 msg.id === messageId
-                    ? {
-                        ...msg,
-                        text: fallbackText,
-                        timestamp: new Date().toISOString()
-                    }
+                    ? { ...msg, text: fallbackText, timestamp: new Date().toISOString() }
                     : msg
             ));
             
-            // Add to typing IDs
-            setTypingMessageIds(prev => [...prev, messageId]);
+            // Add to typing message IDs
+            addTypingMessageId(messageId);
         }
     };
 
@@ -1887,7 +1972,7 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                                             {typingMessageIds.includes(msg.id) ? (
                                                 <TypewriterTextWrapper
                                                     key={`typewriter-message-${msg.id}`}
-                                                    text={typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text)}
+                                                    text={typeof msg.text === 'string' ? formatMessageForDisplay(msg.text) : JSON.stringify(msg.text)}
                                                     speed={20}
                                                     messageId={msg.id}
                                                     skip={skipTypewriter}
@@ -1909,7 +1994,7 @@ Be true to your character - ${agent.id === 'concept' ? 'confident in calculation
                                                 />
                                             ) : (
                                                 <div className="whitespace-pre-wrap break-words text-message">
-                                                    {formatMathExpression(typeof msg.text === 'string' ? msg.text : JSON.stringify(msg.text))}
+                                                    {formatMathExpression(typeof msg.text === 'string' ? formatMessageForDisplay(msg.text) : JSON.stringify(msg.text))}
                                                 </div>
                                             )}
                                         </div>
