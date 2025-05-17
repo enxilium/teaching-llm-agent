@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useFlow } from '@/context/FlowContext';
 import CaptchaComponent from '@/components/Captcha';
 
-type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
+type FlowStage = 'terms' | 'intro' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
 
 export default function Terms() {
     const { agreeToTerms, lessonType } = useFlow();
@@ -64,22 +64,10 @@ export default function Terms() {
                         University of Toronto Research Project Participation Consent Form
                     </p>
                     <p className="mb-4">
-                        Researchers at the University of Toronto are studying how different types of feedback affect people’s ability to solve multiple choice mathematical problems. Researchers will vary the types of information offered to different participants in a Lesson round, and then study how they answer similar questions in a Test round.
+                        Researchers at the University of Toronto are studying how different types of feedback affect people's ability to solve multiple choice mathematical problems. Researchers will vary the types of information offered to different participants in a Lesson round, and then study how they answer similar questions in a Test round.
                     </p>
 
-                    <p className="mb-4">In this task, you will solve multiple-choice math problems about exponents. After some practice questions, you will receive feedback in a “Lesson” round, then move on to more similar questions in a “Test” round. The problems are similar to those commonly found on standardized tests.</p>
-                    
-                    {/* Scenario description based on lessonType */}
-                    <p className="mb-4 bg-purple-900 bg-opacity-50 p-3 rounded-lg border border-purple-500">
-                        {lessonType === 'solo' && 
-                            "After solving the practice problems, you will receive brief feedback on your answers."}
-                        {lessonType === 'single' && 
-                            "After solving the practice problems, you will receive feedback from an AI tutor. You may also ask the tutor questions to help you prepare for the test."}
-                        {lessonType === 'group' && 
-                            "After solving the practice problems, you will see how your AI 'peers' (other AI agents) solved them. You may discuss the problem in a group setting before the test."}
-                        {lessonType === 'multi' && 
-                            "After solving the practice problems, you will receive feedback from an AI tutor alongside AI 'peers' (other AI agents). You may discuss the problem with both the tutor and your peers before the test."}
-                    </p>
+                    <p className="mb-4">In this task, you will solve multiple-choice math problems about exponents. After some practice questions, you will receive feedback in a "Lesson" round, then move on to more similar questions in a "Test" round. The problems are similar to those commonly found on standardized tests.</p>
                     
                     <p className="mb-4">
                         By clicking the survey, you agree that:
@@ -138,7 +126,7 @@ export default function Terms() {
                             : 'bg-gray-500 text-gray-300 cursor-not-allowed'
                         }`}
                     >
-                        Begin Study
+                        Continue to Introduction
                     </button>
                 </div>
             </div>

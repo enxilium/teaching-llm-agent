@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { saveExperimentData } from '@/lib/storage-service';
 
 // Define flow stages
-type FlowStage = 'terms' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
+type FlowStage = 'terms' | 'intro' | 'pre-test' | 'lesson' | 'tetris-break' | 'post-test' | 'final-test' | 'completed';
 
 // Define lesson types
 type LessonType = 'group' | 'multi' | 'single' | 'solo';
@@ -104,6 +104,7 @@ interface FlowContextType {
   
   // Flow progression methods
   agreeToTerms: () => void;
+  completeIntro: () => void;
   completePreTest: () => void;
   completeLesson: () => void;
   completeTetrisBreak: () => void;
@@ -148,6 +149,7 @@ const FlowContext = createContext<FlowContextType>({
   saveSurveyData: () => {},
   
   agreeToTerms: () => {},
+  completeIntro: () => {},
   completePreTest: () => {},
   completeLesson: () => {},
   completeTetrisBreak: () => {},
@@ -585,6 +587,16 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const agreeToTerms = () => {
     setFlowData(prev => ({
       ...prev,
+      currentStage: 'intro'
+    }));
+    
+    router.push('/intro');
+  };
+  
+  // Handle the transition from intro to pre-test
+  const completeIntro = () => {
+    setFlowData(prev => ({
+      ...prev,
       currentStage: 'pre-test'
     }));
     
@@ -969,6 +981,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     saveSurveyData,
     
     agreeToTerms,
+    completeIntro,
     completePreTest,
     completeLesson,
     completeTetrisBreak,
