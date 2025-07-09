@@ -1,8 +1,21 @@
+import { Message } from '@/utils/types';
+
+// Looser type for input messages that may have additional properties
+type InputMessage = Message | {
+  id?: number | string;
+  sender?: string;
+  agentId?: string | null;
+  text?: unknown;
+  timestamp?: Date | string | number;
+  onComplete?: unknown;
+  [key: string]: unknown;
+};
+
 /**
  * Prepares message objects for database storage by removing non-serializable properties
  * and ensuring correct data formats
  */
-export const prepareMessagesForStorage = (messages: any[]): any[] => {
+export const prepareMessagesForStorage = (messages: Message[] | InputMessage[]): Message[] => {
   // CRITICAL DEBUG POINT - Log incoming messages
   console.log(`🧐 prepareMessagesForStorage called with ${messages?.length || 0} messages`);
   
@@ -50,7 +63,9 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
       }
       
       // Remove messages with onComplete functions (not serializable)
-      delete msg.onComplete;
+      if ('onComplete' in msg) {
+        delete (msg as Record<string, unknown>).onComplete;
+      }
       
       // CRITICAL CHANGE: Accept ANY message with valid text
       // Previously might have been filtering too strictly
@@ -63,11 +78,11 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
     // Process each message to ensure proper format
     const formattedMessages = validMessages.map((msg, index) => {
       // Ensure text is a string
-      let textContent = msg.text;
+      let textContent: string = msg.text as string;
       if (typeof textContent !== 'string') {
         try {
           textContent = JSON.stringify(textContent);
-        } catch (e) {
+        } catch {
           textContent = String(textContent || '');
         }
       }
@@ -95,8 +110,8 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
           console.warn(`Invalid timestamp for message ${index}, using current time`);
           timestamp = new Date();
         }
-      } catch (e) {
-        console.warn(`Error processing timestamp for message ${index}, using current time`, e);
+      } catch {
+        console.warn(`Error processing timestamp for message ${index}, using current time`);
         timestamp = new Date();
       }
       
@@ -123,10 +138,10 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
       // Return a clean, consistent message format
       return {
         id: typeof msg.id === 'number' ? msg.id : index,
-        sender: senderName,
+        sender: senderName || 'unknown',
         agentId: msg.agentId || null,
         text: textContent,
-        timestamp: timestamp
+        timestamp: timestamp instanceof Date ? timestamp.toISOString() : String(timestamp)
       };
     });
     
@@ -167,15 +182,16 @@ export const prepareMessagesForStorage = (messages: any[]): any[] => {
       }
       
       return {
-        id: msg?.id || index,
+        id: typeof msg?.id === 'number' ? msg.id : index,
         sender: senderName,
         agentId: msg?.agentId || null,
         text: String(msg?.text || ''),
         timestamp: (() => {
           try {
-            return msg?.timestamp ? new Date(msg.timestamp) : new Date();
-          } catch (e) {
-            return new Date();
+            const date = msg?.timestamp ? new Date(msg.timestamp) : new Date();
+            return date.toISOString();
+          } catch {
+            return new Date().toISOString();
           }
         })()
       };

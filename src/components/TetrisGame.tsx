@@ -1,7 +1,7 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { Piece } from '@/utils/types';
+import { useState, useEffect, useCallback } from "react";
+import { Piece } from "@/utils/types";
 
 // Define the game constants
 const BOARD_WIDTH = 10;
@@ -12,28 +12,61 @@ const SCORE_THRESHOLD = 500; // Score needed to trigger completion
 // Define tetromino shapes
 const SHAPES = [
     [[1, 1, 1, 1]], // I
-    [[1, 1], [1, 1]], // O
-    [[0, 1, 0], [1, 1, 1]], // T
-    [[1, 1, 0], [0, 1, 1]], // Z
-    [[0, 1, 1], [1, 1, 0]], // S
-    [[1, 0, 0], [1, 1, 1]], // J
-    [[0, 0, 1], [1, 1, 1]], // L
+    [
+        [1, 1],
+        [1, 1],
+    ], // O
+    [
+        [0, 1, 0],
+        [1, 1, 1],
+    ], // T
+    [
+        [1, 1, 0],
+        [0, 1, 1],
+    ], // Z
+    [
+        [0, 1, 1],
+        [1, 1, 0],
+    ], // S
+    [
+        [1, 0, 0],
+        [1, 1, 1],
+    ], // J
+    [
+        [0, 0, 1],
+        [1, 1, 1],
+    ], // L
 ];
 
 // Define colors for each shape
-const COLORS = ['#00F0F0', '#F0F000', '#A000F0', '#F00000', '#00F000', '#0000F0', '#F0A000'];
+const COLORS = [
+    "#00F0F0",
+    "#F0F000",
+    "#A000F0",
+    "#F00000",
+    "#00F000",
+    "#0000F0",
+    "#F0A000",
+];
 
 interface TetrisGameProps {
-  onGameComplete?: () => void;
+    onGameComplete?: () => void;
 }
 
 export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
     // Create empty board
     const createEmptyBoard = () =>
-        Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(EMPTY_CELL));
+        Array.from({ length: BOARD_HEIGHT }, () =>
+            Array(BOARD_WIDTH).fill(EMPTY_CELL)
+        );
 
     const [board, setBoard] = useState<number[][]>(createEmptyBoard());
-    const [currentPiece, setCurrentPiece] = useState<Piece>({ shape: SHAPES[0], x: 4, y: 0, color: 0 });
+    const [currentPiece, setCurrentPiece] = useState<Piece>({
+        shape: SHAPES[0],
+        x: 4,
+        y: 0,
+        color: 0,
+    });
     const [score, setScore] = useState(0);
     const [gameOver, setGameOver] = useState(false);
     const [gameStarted, setGameStarted] = useState(false);
@@ -47,44 +80,56 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
             shape: SHAPES[shapeIndex],
             x: Math.floor((BOARD_WIDTH - SHAPES[shapeIndex][0].length) / 2),
             y: 0,
-            color: shapeIndex
+            color: shapeIndex,
         };
     }, []);
 
     // Check if the current position is valid
-    const isValidMove = useCallback((piece: Piece, boardToCheck: number[][]) => {
-        return piece.shape.every((row, dy) => {
-            return row.every((value, dx) => {
-                const x = piece.x + dx;
-                const y = piece.y + dy;
-                return (
-                    value === 0 || // Empty space in tetromino
-                    (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT && boardToCheck[y][x] === EMPTY_CELL)
-                );
+    const isValidMove = useCallback(
+        (piece: Piece, boardToCheck: number[][]) => {
+            return piece.shape.every((row, dy) => {
+                return row.every((value, dx) => {
+                    const x = piece.x + dx;
+                    const y = piece.y + dy;
+                    return (
+                        value === 0 || // Empty space in tetromino
+                        (x >= 0 &&
+                            x < BOARD_WIDTH &&
+                            y >= 0 &&
+                            y < BOARD_HEIGHT &&
+                            boardToCheck[y][x] === EMPTY_CELL)
+                    );
+                });
             });
-        });
-    }, []);
+        },
+        []
+    );
 
     // Add the current piece to the board
-    const addPieceToBoard = useCallback((piece: Piece, boardToUpdate: number[][]) => {
-        const newBoard = boardToUpdate.map(row => [...row]);
-        piece.shape.forEach((row, dy) => {
-            row.forEach((value, dx) => {
-                if (value !== 0) {
-                    const y = piece.y + dy;
-                    const x = piece.x + dx;
-                    if (y >= 0 && y < BOARD_HEIGHT) {
-                        newBoard[y][x] = piece.color + 1; // +1 so it's not 0 (empty)
+    const addPieceToBoard = useCallback(
+        (piece: Piece, boardToUpdate: number[][]) => {
+            const newBoard = boardToUpdate.map((row) => [...row]);
+            piece.shape.forEach((row, dy) => {
+                row.forEach((value, dx) => {
+                    if (value !== 0) {
+                        const y = piece.y + dy;
+                        const x = piece.x + dx;
+                        if (y >= 0 && y < BOARD_HEIGHT) {
+                            newBoard[y][x] = piece.color + 1; // +1 so it's not 0 (empty)
+                        }
                     }
-                }
+                });
             });
-        });
-        return newBoard;
-    }, []);
+            return newBoard;
+        },
+        []
+    );
 
     // Check for completed rows and update score
     const clearRows = useCallback((boardToCheck: number[][]) => {
-        const newBoard = boardToCheck.filter(row => row.some(cell => cell === EMPTY_CELL));
+        const newBoard = boardToCheck.filter((row) =>
+            row.some((cell) => cell === EMPTY_CELL)
+        );
         const clearedRows = BOARD_HEIGHT - newBoard.length;
 
         // Add empty rows at the top
@@ -96,42 +141,60 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
     }, []);
 
     // Move the current piece
-    const movePiece = useCallback((dx: number, dy: number, rotate = false) => {
-        if (gameOver || !gameStarted) return;
+    const movePiece = useCallback(
+        (dx: number, dy: number, rotate = false) => {
+            if (gameOver || !gameStarted) return;
 
-        let newPiece = { ...currentPiece, x: currentPiece.x + dx, y: currentPiece.y + dy };
+            let newPiece = {
+                ...currentPiece,
+                x: currentPiece.x + dx,
+                y: currentPiece.y + dy,
+            };
 
-        if (rotate) {
-            // Transpose and reverse to rotate 90 degrees
-            const shape = currentPiece.shape[0].map((_, i) =>
-                currentPiece.shape.map(row => row[i])
-            ).map(row => [...row].reverse());
+            if (rotate) {
+                // Transpose and reverse to rotate 90 degrees
+                const shape = currentPiece.shape[0]
+                    .map((_, i) => currentPiece.shape.map((row) => row[i]))
+                    .map((row) => [...row].reverse());
 
-            newPiece = { ...newPiece, shape };
-        }
-
-        if (isValidMove(newPiece, board)) {
-            setCurrentPiece(newPiece);
-        } else if (dy > 0) {
-            // Hit something while moving down
-            const newBoard = addPieceToBoard(currentPiece, board);
-            const { newBoard: clearedBoard, rowsCleared } = clearRows(newBoard);
-
-            setBoard(clearedBoard);
-            
-            // Update score and check if threshold reached
-            const newScore = score + (rowsCleared * 100);
-            setScore(newScore);
-
-            const nextPiece = getRandomPiece();
-
-            if (!isValidMove(nextPiece, clearedBoard)) {
-                setGameOver(true);
-            } else {
-                setCurrentPiece(nextPiece);
+                newPiece = { ...newPiece, shape };
             }
-        }
-    }, [board, currentPiece, gameOver, gameStarted, isValidMove, addPieceToBoard, clearRows, getRandomPiece, score]);
+
+            if (isValidMove(newPiece, board)) {
+                setCurrentPiece(newPiece);
+            } else if (dy > 0) {
+                // Hit something while moving down
+                const newBoard = addPieceToBoard(currentPiece, board);
+                const { newBoard: clearedBoard, rowsCleared } =
+                    clearRows(newBoard);
+
+                setBoard(clearedBoard);
+
+                // Update score and check if threshold reached
+                const newScore = score + rowsCleared * 100;
+                setScore(newScore);
+
+                const nextPiece = getRandomPiece();
+
+                if (!isValidMove(nextPiece, clearedBoard)) {
+                    setGameOver(true);
+                } else {
+                    setCurrentPiece(nextPiece);
+                }
+            }
+        },
+        [
+            board,
+            currentPiece,
+            gameOver,
+            gameStarted,
+            isValidMove,
+            addPieceToBoard,
+            clearRows,
+            getRandomPiece,
+            score,
+        ]
+    );
 
     // Drop the piece faster
     const dropPiece = useCallback(() => {
@@ -144,22 +207,27 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
             if (!gameStarted || gameOver) return;
 
             switch (e.key) {
-                case 'ArrowLeft':
+                case "ArrowLeft":
                     movePiece(-1, 0);
                     break;
-                case 'ArrowRight':
+                case "ArrowRight":
                     movePiece(1, 0);
                     break;
-                case 'ArrowDown':
+                case "ArrowDown":
                     movePiece(0, 1);
                     break;
-                case 'ArrowUp':
+                case "ArrowUp":
                     movePiece(0, 0, true); // rotate
                     break;
-                case ' ':
+                case " ":
                     // Hard drop
                     let y = 0;
-                    while (isValidMove({ ...currentPiece, y: currentPiece.y + y + 1 }, board)) {
+                    while (
+                        isValidMove(
+                            { ...currentPiece, y: currentPiece.y + y + 1 },
+                            board
+                        )
+                    ) {
                         y++;
                     }
                     if (y > 0) {
@@ -169,9 +237,9 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
             }
         };
 
-        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener("keydown", handleKeyDown);
         return () => {
-            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener("keydown", handleKeyDown);
         };
     }, [gameStarted, gameOver, currentPiece, board, isValidMove, movePiece]);
 
@@ -187,18 +255,18 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
             clearInterval(gameLoop);
         };
     }, [gameStarted, gameOver, dropPiece]);
-    
+
     // Timer countdown
     useEffect(() => {
         // CRITICAL FIX: Wait for first render to complete before starting timer
         const timerStart = requestAnimationFrame(() => {
             const timer = setInterval(() => {
-                setTimeRemaining(prev => {
+                setTimeRemaining((prev) => {
                     if (prev <= 1) {
                         clearInterval(timer);
                         if (onGameComplete && !completionCalled) {
                             setCompletionCalled(true);
-                            
+
                             // Use requestAnimationFrame again for the callback
                             requestAnimationFrame(() => {
                                 onGameComplete();
@@ -209,26 +277,24 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
                     return prev - 1;
                 });
             }, 1000);
-            
+
             return () => clearInterval(timer);
         });
-        
+
         return () => cancelAnimationFrame(timerStart);
-    }, []);
+    }, [onGameComplete, completionCalled]);
 
     // Handle game completion
     useEffect(() => {
         // Avoid calling onGameComplete multiple times
         if (completionCalled) return;
-        
-        const shouldComplete = 
-            (score >= SCORE_THRESHOLD) || 
-            gameOver || 
-            timeRemaining <= 0;
-            
+
+        const shouldComplete =
+            score >= SCORE_THRESHOLD || gameOver || timeRemaining <= 0;
+
         if (shouldComplete && onGameComplete && !completionCalled) {
             setCompletionCalled(true);
-            
+
             // CRITICAL FIX: Use requestAnimationFrame to defer the callback until after render
             requestAnimationFrame(() => {
                 onGameComplete();
@@ -248,7 +314,7 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
 
     // Render the combined board with the current piece
     const renderBoard = () => {
-        const displayBoard = board.map(row => [...row]);
+        const displayBoard = board.map((row) => [...row]);
 
         if (gameStarted && !gameOver) {
             currentPiece.shape.forEach((row, dy) => {
@@ -271,7 +337,7 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
-        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
     };
 
     // Skip button for those who don't want to play
@@ -292,7 +358,10 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
                 <div className="text-xl">Time: {formatTime(timeRemaining)}</div>
             </div>
 
-            <div className="border border-gray-700 bg-black bg-opacity-70" style={{ width: BOARD_WIDTH * 25 + 'px' }}>
+            <div
+                className="border border-gray-700 bg-black bg-opacity-70"
+                style={{ width: BOARD_WIDTH * 25 + "px" }}
+            >
                 {renderBoard().map((row, y) => (
                     <div key={y} className="flex">
                         {row.map((cell, x) => (
@@ -300,9 +369,11 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
                                 key={`${y}-${x}`}
                                 className="border border-gray-900"
                                 style={{
-                                    width: '25px',
-                                    height: '25px',
-                                    backgroundColor: cell ? COLORS[cell - 1] : 'transparent'
+                                    width: "25px",
+                                    height: "25px",
+                                    backgroundColor: cell
+                                        ? COLORS[cell - 1]
+                                        : "transparent",
                                 }}
                             />
                         ))}
@@ -333,7 +404,7 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
                         >
                             Play Again
                         </button>
-                        
+
                         <button
                             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                             onClick={handleSkip}

@@ -1,38 +1,50 @@
-// Add this directive to ensure this module only runs on server
-'use server';
-
 import mongoose from 'mongoose';
 
-// Connection options
-const options = {
-  bufferCommands: true,
-  autoIndex: true
-};
+const MONGODB_URI = process.env.MONGODB_URI;
 
-// Cache MongoDB connection
-let isConnected = false;
+if (!MONGODB_URI) {
+  throw new Error('Please define the MONGODB_URI environment variable inside .env.local');
+}
 
-export async function connectToDatabase() {
-  // Return existing connection if already connected
-  if (isConnected) {
-    return mongoose.connection;
+interface MongooseCache {
+  conn: typeof mongoose | null;
+  promise: Promise<typeof mongoose> | null;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var mongoose: MongooseCache | undefined;
+}
+
+const cached: MongooseCache = global.mongoose || { conn: null, promise: null };
+
+if (!global.mongoose) {
+  global.mongoose = cached;
+}
+
+export async function connectToDatabase(): Promise<typeof mongoose> {
+  if (cached.conn) {
+    return cached.conn;
   }
 
-  // Get MongoDB URI
-  const MONGODB_URI = process.env.MONGODB_URI;
-  
-  if (!MONGODB_URI) {
-    throw new Error('MONGODB_URI is not defined in environment variables');
+  if (!cached.promise) {
+    const opts = {
+      bufferCommands: false,
+    };
+
+    cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongoose) => {
+      return mongoose;
+    });
   }
 
   try {
-    // Connect to MongoDB
-    await mongoose.connect(MONGODB_URI, options);
-    isConnected = true;
-    console.log('Connected to MongoDB');
-    return mongoose.connection;
-  } catch (error) {
-    console.error('Error connecting to MongoDB:', error);
-    throw error;
+    cached.conn = await cached.promise;
+  } catch (e) {
+    cached.promise = null;
+    throw e;
   }
+
+  return cached.conn;
 }
+
+export default connectToDatabase;

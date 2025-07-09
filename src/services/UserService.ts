@@ -7,7 +7,7 @@ export interface UserData {
 }
 
 class UserService {
-  async createOrUpdateUser(userData: UserData): Promise<any> {
+  async createOrUpdateUser(userData: UserData): Promise<{ success: boolean; data?: UserData; error?: string }> {
     try {
       console.log(`Updating user ${userData.userId}, temp: ${userData.tempRecord !== false}`);
       
@@ -30,7 +30,7 @@ class UserService {
     }
   }
 
-  async getUser(userId: string): Promise<any> {
+  async getUser(userId: string): Promise<{ success: boolean; data?: UserData; error?: string }> {
     try {
       const response = await fetch(`/api/users/${userId}`);
       
@@ -45,7 +45,7 @@ class UserService {
     }
   }
   
-  async finalizeSessions(userId: string): Promise<any> {
+  async finalizeSessions(userId: string): Promise<{ success: boolean; error?: string }> {
     try {
       console.log(`Finalizing all sessions for user ${userId}`);
       
@@ -68,4 +68,5 @@ class UserService {
   }
 }
 
-export default new UserService();
+const userService = new UserService();
+export default userService;

@@ -1,7 +1,7 @@
 {
     "questions": [
         {
-            "question": "If $2 = p^3$, then $8p$ must equal what?",
+            "question": "If $2 = p^3$, then $8p$ must equal what as a power of p?",
             "options": ["$p^4$", "$p^8$", "$p^{10}$", "$p^{12}$"],
             "correctAnswer": "$p^{10}$",
             "answer": "$p^{10}$"

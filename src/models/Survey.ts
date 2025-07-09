@@ -1,64 +1,29 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose from 'mongoose';
 
-// Define interfaces
-export interface SurveyDocument extends Document {
-  userId: string;
-  section: string;
-  submittedAt: Date;
-  data: {
-    confusionLevel?: string;
-    testDifficulty?: string;
-    perceivedCorrectness?: string;
-    learningAmount?: string;
-    feedback?: string;
-    submittedAt?: string;
-    age?: string;
-    gender?: string;
-    educationLevel?: string;
-  };
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-// Define schema
-const SurveySchema = new Schema(
-  {
-    userId: { 
-      type: String, 
-      required: true,
-      index: true 
-    },
-    section: { 
-      type: String, 
-      required: true,
-      index: true
-    },
-    submittedAt: { 
-      type: Date, 
-      default: Date.now 
-    },
-    data: {
-      confusionLevel: { type: String },
-      testDifficulty: { type: String },
-      perceivedCorrectness: { type: String },
-      learningAmount: { type: String },
-      feedback: { type: String },
-      submittedAt: { type: String },
-      age: { type: String },
-      gender: { type: String },
-      educationLevel: { type: String }
-    }
+const SurveySchema = new mongoose.Schema({
+  userId: {
+    type: String,
+    required: true,
   },
-  { 
-    timestamps: true 
-  }
-);
+  confusionLevel: String,
+  testDifficulty: String,
+  perceivedCorrectness: String,
+  learningAmount: String,
+  feedback: String,
+  age: String,
+  gender: String,
+  educationLevel: String,
+  submittedAt: {
+    type: Date,
+    default: Date.now,
+  },
+  hitId: String,
+  assignmentId: String,
+  lessonType: String,
+}, {
+  timestamps: true,
+});
 
-// Create indexes for common queries
-SurveySchema.index({ userId: 1, section: 1 });
-SurveySchema.index({ createdAt: -1 });
-
-// Create model or get existing one
-const Survey = mongoose.models.Survey || mongoose.model<SurveyDocument>('Survey', SurveySchema);
+const Survey = mongoose.models.Survey || mongoose.model('Survey', SurveySchema);
 
 export default Survey;

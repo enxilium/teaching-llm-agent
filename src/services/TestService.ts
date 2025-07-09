@@ -12,7 +12,7 @@ export interface TestData {
 }
 
 export const TestService = {
-  async saveTestAttempt(testData: TestData): Promise<any> {
+  async saveTestAttempt(testData: TestData): Promise<{ success: boolean; data?: TestData; error?: string }> {
     try {
       const response = await fetch('/api/tests', {
         method: 'POST',
@@ -35,7 +35,7 @@ export const TestService = {
     }
   },
   
-  async getUserTestResults(userId: string): Promise<any[]> {
+  async getUserTestResults(userId: string): Promise<TestData[]> {
     try {
       const response = await fetch(`/api/tests?userId=${userId}`);
       const data = await response.json();
@@ -51,7 +51,7 @@ export const TestService = {
     }
   },
   
-  async getUserTestResult(userId: string, testType: 'pre' | 'post' | 'final'): Promise<any> {
+  async getUserTestResult(userId: string, testType: 'pre' | 'post' | 'final'): Promise<TestData | null> {
     try {
       const response = await fetch(`/api/tests?userId=${userId}&testType=${testType}`);
       const data = await response.json();

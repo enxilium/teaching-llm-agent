@@ -16,14 +16,14 @@ export async function retryWithBackoff<T>(
   delayMs: number = 1000,
   backoffFactor: number = 2
 ): Promise<T> {
-  let lastError: any;
+  let lastError: Error | null = null;
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
       console.warn(`Operation failed (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
-      lastError = error;
+      lastError = error instanceof Error ? error : new Error(String(error));
       
       if (attempt < maxRetries) {
         const waitTime = delayMs * Math.pow(backoffFactor, attempt);
@@ -33,5 +33,5 @@ export async function retryWithBackoff<T>(
     }
   }
   
-  throw lastError;
+  throw lastError || new Error('Operation failed after all retries');
 } 

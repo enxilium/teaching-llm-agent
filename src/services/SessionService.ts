@@ -15,7 +15,7 @@ export interface SessionData {
 }
 
 export const SessionService = {
-  async createSession(sessionData: SessionData): Promise<any> {
+  async createSession(sessionData: SessionData): Promise<{ success: boolean; data?: SessionData; error?: string }> {
     try {
       console.log(`Creating session for user ${sessionData.userId} with ${sessionData.messages?.length || 0} messages`);
       
@@ -25,7 +25,7 @@ export const SessionService = {
         console.log(`Message details before formatting: ${JSON.stringify(sessionData.messages.slice(0, 1))}`);
         
         // Make sure each message has the required fields
-        sessionData.messages = sessionData.messages.map((msg: any) => ({
+        sessionData.messages = sessionData.messages.map((msg: Message) => ({
           id: Number(msg.id) || 0,
           sender: String(msg.sender || ''),
           agentId: msg.agentId || null,
@@ -55,7 +55,7 @@ export const SessionService = {
     }
   },
   
-  async getUserSessions(userId: string, includeTemp: boolean = false): Promise<any[]> {
+  async getUserSessions(userId: string, includeTemp: boolean = false): Promise<SessionData[]> {
     try {
       // Build URL with proper parameters
       const url = includeTemp 

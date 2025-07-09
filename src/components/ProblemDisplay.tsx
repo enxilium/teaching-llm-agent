@@ -1,0 +1,41 @@
+import React from "react";
+import { formatTime } from "@/lib/utils";
+import RenderMathExpression from "./RenderMathExpression";
+
+interface ProblemDisplayProps {
+    question: string;
+    timeLeft: number;
+    timeElapsed: number;
+    hasSubmittedAnswer: boolean;
+    isMultiScenario: boolean;
+}
+
+const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
+    question,
+    timeLeft,
+    timeElapsed,
+    hasSubmittedAnswer,
+    isMultiScenario,
+}) => {
+    // Only show timer after submission (2-minute countdown)
+    const shouldShowTimer = hasSubmittedAnswer;
+    const timeToDisplay = timeLeft;
+
+    return (
+        <div className="bg-white bg-opacity-20 p-4 rounded-md mb-4 border-2 border-purple-400">
+            <div className="flex justify-between items-start mb-2">
+                <h2 className="text-xl text-white font-semibold">Problem:</h2>
+                {shouldShowTimer && (
+                    <div className="bg-purple-900 bg-opacity-50 rounded-lg px-3 py-1 text-white">
+                        Time: {formatTime(timeToDisplay)}
+                    </div>
+                )}
+            </div>
+            <p className="text-white text-lg">
+                <RenderMathExpression text={question} />
+            </p>
+        </div>
+    );
+};
+
+export default ProblemDisplay;

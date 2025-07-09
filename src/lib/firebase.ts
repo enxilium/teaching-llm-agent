@@ -1,6 +1,7 @@
 // Firebase configuration and services
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, serverTimestamp, Firestore } from 'firebase/firestore';
+import { ExperimentData } from '@/utils/types';
 
 // Your Firebase configuration
 // Replace these values with your actual Firebase project configuration
@@ -27,7 +28,7 @@ try {
 
 // Sanitize data for Firestore
 // Firestore doesn't support certain JavaScript types like Date objects or undefined values
-function sanitizeForFirestore(obj: any): any {
+function sanitizeForFirestore(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return null; // Replace undefined with null
   }
@@ -45,10 +46,10 @@ function sanitizeForFirestore(obj: any): any {
   }
   
   // Process object properties
-  const sanitized: Record<string, any> = {};
-  for (const key in obj) {
+  const sanitized: Record<string, unknown> = {};
+  for (const key in obj as Record<string, unknown>) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      const value = obj[key];
+      const value = (obj as Record<string, unknown>)[key];
       if (value !== undefined) { // Skip undefined values
         sanitized[key] = sanitizeForFirestore(value);
       }
@@ -77,7 +78,7 @@ function sanitizeForFirestore(obj: any): any {
  *   }
  * }
  */
-export async function saveDataToFirebase(data: any) {
+export async function saveDataToFirebase(data: ExperimentData) {
   try {
     // Check if Firebase was properly initialized
     if (!app || !firestore) {
@@ -116,11 +117,11 @@ export async function saveDataToFirebase(data: any) {
     await setDoc(docRef, sanitizedData);
     console.log('CLIENT: Data successfully backed up to Firebase!');
     return { success: true, docId: docRef.id };
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Provide more detailed error information
     let errorMsg = 'Unknown error';
     
-    if (error.code === 'permission-denied') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'permission-denied') {
       errorMsg = 'Firebase permissions error: This is expected if you are using server-side approach.';
       console.log('PERMISSION DENIED: This is normal if you are using the server-side Admin SDK approach.');
       console.log('The client-side backup is only for emergency scenarios.');
@@ -136,11 +137,13 @@ export async function saveDataToFirebase(data: any) {
         }
       }
       `);
-    } else if (error.code === 'unavailable') {
-      errorMsg = 'Firebase unavailable: Check your internet connection or if requests are being blocked';
-    } else if (error.code === 'not-found') {
-      errorMsg = 'Firebase resource not found: Check your project ID and collection path';
-    } else if (error.message) {
+    } else if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'unavailable') {
+        errorMsg = 'Firebase unavailable: Check your internet connection or if requests are being blocked';
+      } else if (error.code === 'not-found') {
+        errorMsg = 'Firebase resource not found: Check your project ID and collection path';
+      }
+    } else if (error instanceof Error) {
       errorMsg = error.message;
     }
     
@@ -155,12 +158,13 @@ export async function saveDataToFirebase(data: any) {
           timestamp: new Date().toISOString()
         }));
         console.log('Error details saved to localStorage for recovery');
-      } catch (e) {
-        console.error('Failed to save error details to localStorage:', e);
+      } catch {
+        console.error('Failed to save error details to localStorage');
       }
     }
     
-    return { success: false, error: errorMsg, errorCode: error.code };
+    const errorCode = error && typeof error === 'object' && 'code' in error ? error.code : 'unknown';
+    return { success: false, error: errorMsg, errorCode };
   }
 }
 
