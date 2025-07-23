@@ -229,7 +229,40 @@ const Chat: React.FC<ChatProps> = ({
             try {
                 let enhancedSystemPrompt = aliceAgent.systemPrompt + `\n\n[Response ID: ${aliceAgent.id}-${Date.now()}-${Math.random().toFixed(6)}]`;
                 
-                enhancedSystemPrompt += `\n\nYou are Alice, a student who just heard another student answer this math problem.
+                // Check if we're in group scenario and if Charlie has already responded
+                const hasBob = agents.some(agent => agent.id === "bob");
+                const isGroupScenario = !hasBob;
+                const charlieMessage = conversationHistory.find(msg => msg.agentId === "concept");
+                const userMessage = conversationHistory.find(msg => msg.sender === "user");
+                
+                if (isGroupScenario && charlieMessage) {
+                    // Group scenario: Alice responding after Charlie
+                    enhancedSystemPrompt += `\n\nYou are Alice, a student in a group discussion who just heard two other students answer this math problem.
+
+WHAT THEY SAID:
+- User said: "${userMessage?.text || "No response"}"
+- Charlie said: "${charlieMessage?.text || "No response"}"
+
+TASK: 
+1. React to both their answers as a fellow student:
+   - Look at what each student said and their reasoning
+   - Give your own answer showing good conceptual understanding but making arithmetic errors
+   - Be brief and natural (1-2 sentences)
+2. Then ask the user a follow-up question to keep the discussion going:
+   - Ask about their reasoning, approach, or a related concept
+   - Be curious and engaging like a real student would be
+
+FORMAT: 
+[Your response to their answers] [Then ask user a question]
+
+Example: "I think you're both right about the approach, but I got a different number when I calculated it. @User, can you show me how you got that specific step?"
+
+IMPORTANT: 
+- Don't use any special formatting like asterisks, bold, or markdown
+- End with "@User, [your specific question]"`;
+                } else {
+                    // Regular initial response or multi scenario
+                    enhancedSystemPrompt += `\n\nYou are Alice, a student who just heard another student answer this math problem.
 
 TASK: React to their answer as a fellow student:
 - Say if you agree or disagree with their answer
@@ -239,6 +272,7 @@ TASK: React to their answer as a fellow student:
 - Don't use any special formatting like asterisks, bold, or markdown
 
 Example: "I agree with your approach! I got..." or "Actually, I think it's different. I calculated..."`;
+                }
 
                 // Add current question context
                 if (currentQuestion) {
@@ -271,6 +305,15 @@ Example: "I agree with your approach! I got..." or "Actually, I think it's diffe
                 
                 removeTypingMessageId(placeholderId);
                 onNewMessage(finalMessage);
+                
+                // In group scenario when Alice responds after Charlie, start inactivity timer
+                if (isGroupScenario && charlieMessage) {
+                    setTimeout(() => {
+                        setIsQuestioningEnabled(true);
+                        startInactivityTimer("arithmetic"); // Pass Alice's ID for group scenario tracking
+                    }, 1000);
+                }
+                
                 return finalMessage;
             } catch (error) {
                 console.error("Error generating Alice's initial message:", error);
@@ -415,8 +458,10 @@ Example good responses: "I agree!" or "Actually, I think it's..." or "Wait, let 
                 const isGroupScenario = !hasBob;
                 
                 if (isGroupScenario) {
-                    // Group scenario: Charlie should respond and then prompt the user for more discussion
-                    enhancedSystemPrompt += `\n\nYou are Charlie, a student in a group discussion who just heard two other students answer this math problem.
+                    // Check if Alice has already responded
+                    if (aliceMessage) {
+                        // Charlie is responding after Alice
+                        enhancedSystemPrompt += `\n\nYou are Charlie, a student in a group discussion who just heard two other students answer this math problem.
 
 WHAT THEY SAID:
 - User said: "${userMessage?.text || "No response"}"
@@ -439,6 +484,26 @@ Example: "I disagree with your approach, I think we should multiply first and go
 IMPORTANT: 
 - Don't use any special formatting like asterisks, bold, or markdown
 - End with "@User, [your specific question]"`;
+                    } else {
+                        // Charlie is responding first (before Alice)
+                        enhancedSystemPrompt += `\n\nYou are Charlie, a student in a group discussion who just heard another student answer this math problem.
+
+WHAT THEY SAID:
+- User said: "${userMessage?.text || "No response"}"
+
+TASK: 
+- React to their answer as a fellow student
+- Look at what the user said and their reasoning
+- Give your own answer using wrong conceptual approach but correct arithmetic within that approach
+- Be brief and slightly argumentative (1-2 sentences)
+- Don't ask any questions - just give your response
+
+Example: "I disagree with that approach, I think we should multiply first and got 12 instead."
+
+IMPORTANT: 
+- Don't use any special formatting like asterisks, bold, or markdown
+- Don't ask any questions or use "@User" - another student will respond next`;
+                    }
                 } else {
                     // Multi scenario: Charlie responds normally (Bob will follow up)
                     enhancedSystemPrompt += `\n\nYou are Charlie, a student who just heard two other students answer this math problem.
@@ -494,12 +559,16 @@ Example: "I got the same answer as Alice, but I used a different method..." or "
                 
                 // In group scenario, set up alternating for future responses
                 if (isGroupScenario) {
-                    lastRespondentTypeRef.current = "bot"; // Charlie just responded, so next should be user
-                    setIsQuestioningEnabled(true); // Enable user input
-                    // Start inactivity timer since user should respond
-                    setTimeout(() => {
-                        startInactivityTimer("concept"); // Pass Charlie's ID for group scenario tracking
-                    }, 1000);
+                    // Only start timer if Charlie is responding after Alice (and asking user a question)
+                    if (aliceMessage) {
+                        lastRespondentTypeRef.current = "bot"; // Charlie just responded, so next should be user
+                        setIsQuestioningEnabled(true); // Enable user input
+                        // Start inactivity timer since user should respond
+                        setTimeout(() => {
+                            startInactivityTimer("concept"); // Pass Charlie's ID for group scenario tracking
+                        }, 1000);
+                    }
+                    // If Charlie is going first (no Alice response yet), don't start timer - Alice will respond next
                 }
                 
                 return finalMessage;
@@ -1030,21 +1099,39 @@ Example: "Thanks ${respondentName}, I see you said [brief reference to their res
                     console.log("Single scenario: Generating Bob's direct response...");
                     await bobInitialMessage(conversationHistory);
                 } else if ((hasAlice || hasCharlie) && !hasBob) {
-                    // Group scenario: Alice → Charlie sequence (like multi, but Charlie prompts user instead of Bob)
-                    console.log("Group scenario: Starting Alice → Charlie sequence...");
+                    // Group scenario: Randomize agent order (like multi, but second agent prompts user instead of Bob)
+                    console.log("Group scenario: Starting randomized agent sequence...");
                     
                     if (hasAlice && hasCharlie) {
-                        // Both agents available: Full Alice → Charlie sequence
-                        console.log("Group scenario: Generating Alice's initial response...");
-                        const aliceMessage = await aliceInitialMessage(conversationHistory);
-                        if (!aliceMessage) return;
-                        conversationHistory.push(aliceMessage);
+                        // Both agents available: Randomize who goes first
+                        const firstAgent = Math.random() < 0.5 ? "Alice" : "Charlie";
+                        console.log(`Group scenario: ${firstAgent} will respond first`);
+                        
+                        if (firstAgent === "Alice") {
+                            // Alice → Charlie sequence
+                            console.log("Group scenario: Generating Alice's initial response...");
+                            const aliceMessage = await aliceInitialMessage(conversationHistory);
+                            if (!aliceMessage) return;
+                            conversationHistory.push(aliceMessage);
 
-                        // Wait a bit before Charlie responds
-                        await new Promise(resolve => setTimeout(resolve, 1500));
+                            // Wait a bit before Charlie responds
+                            await new Promise(resolve => setTimeout(resolve, 1500));
 
-                        console.log("Group scenario: Generating Charlie's initial response (with user prompt)...");
-                        await charlieInitialMessage(conversationHistory);
+                            console.log("Group scenario: Generating Charlie's initial response (with user prompt)...");
+                            await charlieInitialMessage(conversationHistory);
+                        } else {
+                            // Charlie → Alice sequence
+                            console.log("Group scenario: Generating Charlie's initial response...");
+                            const charlieMessage = await charlieInitialMessage(conversationHistory);
+                            if (!charlieMessage) return;
+                            conversationHistory.push(charlieMessage);
+
+                            // Wait a bit before Alice responds
+                            await new Promise(resolve => setTimeout(resolve, 1500));
+
+                            console.log("Group scenario: Generating Alice's initial response (with user prompt)...");
+                            await aliceInitialMessage(conversationHistory);
+                        }
                     } else if (hasAlice) {
                         // Only Alice available
                         console.log("Group scenario: Only Alice available, generating her response...");
