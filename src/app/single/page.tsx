@@ -35,10 +35,11 @@ export default function SinglePage() {
         null
     );
     const [timeElapsed, setTimeElapsed] = useState(0); // Time counting up before submission (hidden)
-    const [timeLeft, setTimeLeft] = useState(120); // Time counting down after discussion starts (2 minutes)
+    const [timeLeft, setTimeLeft] = useState(300); // Time counting down after discussion starts (5 minutes)
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
     const [sessionStartTime] = useState<Date>(new Date());
     const [canSubmit, setCanSubmit] = useState(false); // Add state for tracking if submit button can be enabled
+    const [canSkip, setCanSkip] = useState(false); // Add state for tracking if skip button can be enabled
     const [agents, setAgents] = useState<Agent[]>([]);
     const [initialMessages, setInitialMessages] = useState<Message[]>([]);
     const [allMessages, setAllMessages] = useState<Message[]>([]);
@@ -127,7 +128,14 @@ export default function SinglePage() {
 
         const timerId = setInterval(() => {
             setTimeLeft((prev) => {
-                if (prev <= 1) {
+                const newTime = prev - 1;
+                
+                // Enable skip button after 2 minutes (when 3 minutes remain)
+                if (newTime <= 180 && !canSkip) {
+                    setCanSkip(true);
+                }
+                
+                if (newTime <= 1) {
                     roundEndedRef.current = true;
                     const userAnswerText =
                         finalAnswer.trim() || "No answer provided";
@@ -136,35 +144,53 @@ export default function SinglePage() {
                     });
                     return 0;
                 }
-                return prev - 1;
+                return newTime;
             });
         }, 1000);
 
         return () => clearInterval(timerId);
-    }, [hasSubmittedAnswer, completeLesson, finalAnswer, saveSessionData]);
+    }, [hasSubmittedAnswer, completeLesson, finalAnswer, saveSessionData, canSkip]);
 
     const handleSend = () => {
         const submissionText = finalAnswer.trim() || "No answer specified";
+        const reasoning = scratchboardContent.trim();
+        
         // Use a more robust unique ID to avoid conflicts with agent messages
         const uniqueId = Date.now() * 1000; // Large number to avoid conflicts
+        
+        // Format message based on whether reasoning was provided
+        let messageText = `Final Answer: ${submissionText}`;
+        if (reasoning) {
+            messageText += `\n\nReasoning: ${reasoning}`;
+        }
+        
         const userFinalAnswer: Message = {
             id: uniqueId,
             sender: "user",
-            text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${
-                scratchboardContent || "No work shown"
-            }`,
+            text: messageText,
             timestamp: new Date().toISOString(),
         };
 
         setInitialMessages([userFinalAnswer]);
         setAllMessages([userFinalAnswer]); // Track in allMessages too
         setHasSubmittedAnswer(true);
-        setTimeLeft(120); // Reset timer to 2 minutes when scenario starts
+        setTimeLeft(300); // Reset timer to 5 minutes when scenario starts
+        setCanSkip(false); // Reset skip button
     };
 
     const handleNewMessage = useCallback((message: Message) => {
         setAllMessages((prev) => [...prev, message]);
     }, []);
+
+    const handleSkip = useCallback(() => {
+        if (!canSkip || roundEndedRef.current) return;
+        
+        roundEndedRef.current = true;
+        const userAnswerText = finalAnswer.trim() || "No answer provided";
+        saveSessionData(userAnswerText, false).then(() => {
+            completeLesson();
+        });
+    }, [canSkip, finalAnswer, saveSessionData, completeLesson]);
 
     if (!currentQuestion) {
         return (
@@ -188,6 +214,8 @@ export default function SinglePage() {
                         timeElapsed={timeElapsed}
                         hasSubmittedAnswer={hasSubmittedAnswer}
                         isMultiScenario={false}
+                        canSkip={canSkip}
+                        onSkip={handleSkip}
                     />
                 )}
                 <AnswerInput

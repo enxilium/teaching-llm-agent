@@ -39,6 +39,8 @@ const Chat: React.FC<ChatProps> = ({
     const [typingMessageIds, setTypingMessageIds] = useState<number[]>([]);
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const interventionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastQuestioningAgent = useRef<string | null>(null); // Track which agent asked the last question
     const followUpInProgressRef = useRef(false);
     const followUpCountRef = useRef(0); // Track follow-up rounds
     const agentResponseInProgressRef = useRef(false); // Prevent multiple simultaneous responses
@@ -94,6 +96,117 @@ const Chat: React.FC<ChatProps> = ({
             });
         }
     };
+
+    // Inactivity timer functions
+    const startInactivityTimer = useCallback((questioningAgent?: string) => {
+        // Clear any existing timer
+        if (inactivityTimeoutRef.current) {
+            clearTimeout(inactivityTimeoutRef.current);
+        }
+        
+        // Store which agent asked the question (for group scenario)
+        if (questioningAgent) {
+            lastQuestioningAgent.current = questioningAgent;
+        }
+        
+        // Start 1-minute inactivity timer
+        inactivityTimeoutRef.current = setTimeout(() => {
+            handleInactivity();
+        }, 60000); // 1 minute
+    }, []);
+
+    const clearInactivityTimer = useCallback(() => {
+        if (inactivityTimeoutRef.current) {
+            clearTimeout(inactivityTimeoutRef.current);
+            inactivityTimeoutRef.current = null;
+        }
+    }, []);
+
+    const handleInactivity = useCallback(async () => {
+        if (agentResponseInProgressRef.current) return;
+        
+        agentResponseInProgressRef.current = true;
+        setIsQuestioningEnabled(false);
+        
+        try {
+            // Determine scenario based on available agents
+            const hasAlice = agents.some(agent => agent.id === "arithmetic");
+            const hasCharlie = agents.some(agent => agent.id === "concept");
+            const hasBob = agents.some(agent => agent.id === "bob");
+
+            if (hasBob && hasAlice && hasCharlie) {
+                // Multi scenario: Alice or Charlie answers Bob's question
+                const respondingAgent = Math.random() < 0.5 ? "Alice" : "Charlie";
+                let inactivityResponse;
+                
+                if (respondingAgent === "Alice") {
+                    inactivityResponse = await generateAliceInactivityResponse();
+                } else {
+                    inactivityResponse = await generateCharlieInactivityResponse();
+                }
+                
+                // After inactivity response, trigger Bob to respond like normal
+                if (inactivityResponse) {
+                    setTimeout(() => {
+                        const conversationHistory = [...messages, inactivityResponse];
+                        generateBobMessage(conversationHistory, true); // Auto-trigger next participant
+                    }, 2000);
+                }
+            } else if (!hasBob && (hasAlice || hasCharlie)) {
+                // Group scenario: The agent who didn't ask responds
+                const questioningAgent = lastQuestioningAgent.current;
+                let inactivityResponse;
+                
+                if (questioningAgent === "arithmetic" && hasCharlie) {
+                    // Alice asked, Charlie responds
+                    inactivityResponse = await generateCharlieInactivityResponse();
+                } else if (questioningAgent === "concept" && hasAlice) {
+                    // Charlie asked, Alice responds
+                    inactivityResponse = await generateAliceInactivityResponse();
+                } else {
+                    // Fallback: random agent responds
+                    const availableAgents = [];
+                    if (hasAlice) availableAgents.push("Alice");
+                    if (hasCharlie) availableAgents.push("Charlie");
+                    const randomAgent = availableAgents[Math.floor(Math.random() * availableAgents.length)];
+                    if (randomAgent === "Alice") {
+                        inactivityResponse = await generateAliceInactivityResponse();
+                    } else {
+                        inactivityResponse = await generateCharlieInactivityResponse();
+                    }
+                }
+                
+                // After inactivity response, continue group conversation
+                if (inactivityResponse) {
+                    setTimeout(() => {
+                        // Determine which agent should respond next (the one who didn't just respond)
+                        const justRespondedAgent = inactivityResponse.agentId;
+                        if (justRespondedAgent === "arithmetic" && hasCharlie) {
+                            generateCharlieMessage(inactivityResponse);
+                        } else if (justRespondedAgent === "concept" && hasAlice) {
+                            generateAliceMessage(inactivityResponse);
+                        }
+                        // Note: No timer restart here - timer only restarts when @User is mentioned
+                    }, 2000);
+                }
+            } else if (hasBob && !hasAlice && !hasCharlie) {
+                // Single scenario: Bob asks a simpler question
+                const simplifiedQuestion = await generateBobSimplifiedQuestion();
+                
+                // After Bob asks simpler question, restart timer for user response
+                if (simplifiedQuestion) {
+                    setIsQuestioningEnabled(true);
+                    setTimeout(() => {
+                        startInactivityTimer();
+                    }, 1000);
+                }
+            }
+        } catch (error) {
+            console.error("Error handling inactivity:", error);
+        } finally {
+            agentResponseInProgressRef.current = false;
+        }
+    }, [agents, setIsQuestioningEnabled, startInactivityTimer, messages]);
 
     // Alice's initial message (responds to user's answer)
     const aliceInitialMessage = useCallback(
@@ -164,7 +277,7 @@ Example: "I agree with your approach! I got..." or "Actually, I think it's diffe
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, setIsQuestioningEnabled, startInactivityTimer]
     );
 
     // Alice's generate message (responds to previous message)
@@ -257,6 +370,10 @@ Example good responses: "I agree!" or "Actually, I think it's..." or "Wait, let 
                 if (isGroupMode) {
                     lastRespondentTypeRef.current = "bot"; // Alice just responded, so next should be user
                     setIsQuestioningEnabled(true); // Enable user input
+                    // Start inactivity timer since user should respond
+                    setTimeout(() => {
+                        startInactivityTimer("arithmetic"); // Pass Alice's ID for group scenario tracking
+                    }, 1000);
                 }
                 
                 return finalMessage;
@@ -265,7 +382,7 @@ Example good responses: "I agree!" or "Actually, I think it's..." or "Wait, let 
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, onNewMessage, setIsQuestioningEnabled]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, onNewMessage, setIsQuestioningEnabled, startInactivityTimer]
     );
 
     // Charlie's initial message (responds to user's and Alice's answers)
@@ -378,6 +495,11 @@ Example: "I got the same answer as Alice, but I used a different method..." or "
                 // In group scenario, set up alternating for future responses
                 if (isGroupScenario) {
                     lastRespondentTypeRef.current = "bot"; // Charlie just responded, so next should be user
+                    setIsQuestioningEnabled(true); // Enable user input
+                    // Start inactivity timer since user should respond
+                    setTimeout(() => {
+                        startInactivityTimer("concept"); // Pass Charlie's ID for group scenario tracking
+                    }, 1000);
                 }
                 
                 return finalMessage;
@@ -386,7 +508,7 @@ Example: "I got the same answer as Alice, but I used a different method..." or "
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, setIsQuestioningEnabled, startInactivityTimer]
     );
 
     // Charlie's generate message (responds to previous message)
@@ -479,6 +601,10 @@ Example good responses: "I disagree!" or "That's not right..." or "Actually, I t
                 if (isGroupMode) {
                     lastRespondentTypeRef.current = "bot"; // Charlie just responded, so next should be user
                     setIsQuestioningEnabled(true); // Enable user input
+                    // Start inactivity timer since user should respond
+                    setTimeout(() => {
+                        startInactivityTimer("concept"); // Pass Charlie's ID for group scenario tracking
+                    }, 1000);
                 }
                 
                 return finalMessage;
@@ -487,7 +613,7 @@ Example good responses: "I disagree!" or "That's not right..." or "Actually, I t
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, onNewMessage, setIsQuestioningEnabled]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, onNewMessage, setIsQuestioningEnabled, startInactivityTimer]
     );
 
     // Bob's initial message (provides feedback and prompts next participant)
@@ -653,7 +779,12 @@ IMPORTANT: End with "@User, [specific question for them]"`;
                             }
                         });
                     }
-                    // If @User, do nothing - user will respond manually
+                    // If @User, start inactivity timer since user should respond
+                    if (nextParticipant === "@User") {
+                        setTimeout(() => {
+                            startInactivityTimer();
+                        }, 1000); // Small delay to ensure message is fully rendered
+                    }
                 }, 3000);
 
                 return finalMessage;
@@ -662,7 +793,7 @@ IMPORTANT: End with "@User, [specific question for them]"`;
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, startInactivityTimer]
     );
 
     // Bob's generate message (responds to previous TWO messages for context)
@@ -823,7 +954,12 @@ Example: "Thanks ${respondentName}, I see you said [brief reference to their res
                                 }
                             });
                         }
-                        // If @User, do nothing - user will respond manually
+                        // If @User, start inactivity timer since user should respond
+                        if (nextParticipant === "@User") {
+                            setTimeout(() => {
+                                startInactivityTimer();
+                            }, 1000); // Small delay to ensure message is fully rendered
+                        }
                     }, 2000);
                 }
 
@@ -833,7 +969,7 @@ Example: "Thanks ${respondentName}, I see you said [brief reference to their res
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, messages]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, messages, startInactivityTimer]
     );
 
     // Simplified sequential agent response function
@@ -935,6 +1071,9 @@ Example: "Thanks ${respondentName}, I see you said [brief reference to their res
     // Handle user messages - different logic based on scenario
     const handleUserMessage = useCallback(
         async (userMessage: Message) => {
+            // Clear inactivity timer since user responded
+            clearInactivityTimer();
+            
             // Prevent multiple simultaneous user message handling
             if (agentResponseInProgressRef.current) {
                 console.log("Agent response already in progress, skipping user message handling");
@@ -1012,7 +1151,7 @@ Example: "Thanks ${respondentName}, I see you said [brief reference to their res
                 agentResponseInProgressRef.current = false;
             }
         },
-        [generateBobMessage, generateAliceMessage, generateCharlieMessage, setMessages, onNewMessage, setIsQuestioningEnabled, agents, typingMessageIds]
+        [generateBobMessage, generateAliceMessage, generateCharlieMessage, setMessages, onNewMessage, setIsQuestioningEnabled, agents, typingMessageIds, clearInactivityTimer]
     );
 
     // Effect to trigger initial agent responses after user submission (one-time only)
@@ -1064,6 +1203,230 @@ Example: "Thanks ${respondentName}, I see you said [brief reference to their res
             avatar: agent?.avatar || "tutor_avatar.svg",
         };
     };
+
+    // Inactivity response functions
+    const generateAliceInactivityResponse = useCallback(async () => {
+        const aliceAgent = agents.find(agent => agent.id === "arithmetic");
+        if (!aliceAgent) return;
+
+        const placeholderId = getUniqueMessageId();
+        const placeholder: Message = {
+            id: placeholderId,
+            sender: "ai",
+            agentId: aliceAgent.id,
+            text: "...",
+            timestamp: new Date().toISOString(),
+        };
+
+        setMessages(prev => [...prev, placeholder]);
+        addTypingMessageId(placeholderId);
+
+        try {
+            const currentTime = new Date().toISOString();
+            
+            // Get the most recent message (should be Bob's question or Charlie's question)
+            const lastMessage = messages[messages.length - 1];
+            const lastMessageText = lastMessage?.text || "";
+            
+            const inactivityPrompt = `The user has been silent for a while after being asked a question. You are Alice, and you need to answer the question in the user's place as if you were a student trying to help move the conversation forward.
+
+LAST MESSAGE/QUESTION: "${lastMessageText}"
+
+TASK: 
+- Answer the specific question that was just asked, directly and naturally
+- If it's asking about your reasoning or approach, explain your thinking
+- If it's asking for a calculation, do the math (with your characteristic arithmetic errors)
+- If it's asking for an opinion or method choice, give your perspective
+- Be conversational and natural, as if you're jumping in to help
+- Don't mention that the user was silent - just answer the question directly
+- Don't start with phrases like "Let me try to answer that" or "I can help with that"
+
+Example responses:
+- If asked "Why did you choose that method?": "Well, I thought that approach made more sense because..."
+- If asked "What do you think the answer is?": "I calculated it and got..."
+- If asked "Can you explain that step?": "Sure! What I did was..."
+
+Answer as if the question was directed at you personally.`;
+            
+            const response = await aiService.generateResponse(
+                messages.slice(-3), // Last 3 messages for context
+                {
+                    systemPrompt: aliceAgent.systemPrompt + "\n\n" + inactivityPrompt,
+                    model: aliceAgent.model,
+                    temperature: 0.8,
+                }
+            );
+
+            const finalMessage: Message = {
+                id: placeholderId,
+                sender: "ai",
+                agentId: aliceAgent.id,
+                text: response,
+                timestamp: currentTime,
+            };
+
+            setMessages(prev => prev.map(msg => 
+                msg.id === placeholderId ? finalMessage : msg
+            ));
+            
+            removeTypingMessageId(placeholderId);
+            onNewMessage(finalMessage);
+            
+            return finalMessage;
+        } catch (error) {
+            console.error("Error generating Alice inactivity response:", error);
+            removeTypingMessageId(placeholderId);
+            return null;
+        }
+    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId]);
+
+    const generateCharlieInactivityResponse = useCallback(async () => {
+        const charlieAgent = agents.find(agent => agent.id === "concept");
+        if (!charlieAgent) return;
+
+        const placeholderId = getUniqueMessageId();
+        const placeholder: Message = {
+            id: placeholderId,
+            sender: "ai",
+            agentId: charlieAgent.id,
+            text: "...",
+            timestamp: new Date().toISOString(),
+        };
+
+        setMessages(prev => [...prev, placeholder]);
+        addTypingMessageId(placeholderId);
+
+        try {
+            const currentTime = new Date().toISOString();
+            
+            // Get the most recent message (should be Bob's question or Alice's question)
+            const lastMessage = messages[messages.length - 1];
+            const lastMessageText = lastMessage?.text || "";
+            
+            const inactivityPrompt = `The user has been silent for a while after being asked a question. You are Charlie, and you need to answer the question in the user's place as if you were a student trying to help move the conversation forward.
+
+LAST MESSAGE/QUESTION: "${lastMessageText}"
+
+TASK: 
+- Answer the specific question that was just asked, directly and naturally
+- If it's asking about your reasoning or approach, explain your thinking
+- If it's asking for a calculation, do the math (with your characteristic wrong conceptual approach but correct arithmetic)
+- If it's asking for an opinion or method choice, give your perspective
+- Be conversational and natural, as if you're jumping in to help
+- Don't mention that the user was silent - just answer the question directly
+- Don't start with phrases like "Let me try to answer that" or "I can help with that"
+
+Example responses:
+- If asked "Why did you choose that method?": "I chose that because I think..."
+- If asked "What do you think the answer is?": "I calculated it and got..."
+- If asked "Can you explain that step?": "Oh sure! The way I see it..."
+
+Answer as if the question was directed at you personally.`;
+            
+            const enhancedSystemPrompt = charlieAgent.systemPrompt + "\n\n" + inactivityPrompt;
+            const conversationHistory = messages.slice(-3);
+
+            const aiResponse = await aiService.generateResponse(
+                conversationHistory,
+                {
+                    systemPrompt: enhancedSystemPrompt,
+                    model: charlieAgent.model,
+                    temperature: 0.8
+                }
+            );
+
+            const finalMessage: Message = {
+                id: placeholderId,
+                sender: "ai",
+                agentId: charlieAgent.id,
+                text: aiResponse,
+                timestamp: currentTime,
+            };
+
+            setMessages(prev => prev.map(msg => 
+                msg.id === placeholderId ? finalMessage : msg
+            ));
+            
+            removeTypingMessageId(placeholderId);
+            onNewMessage(finalMessage);
+            
+            return finalMessage;
+        } catch (error) {
+            console.error("Error generating Charlie inactivity response:", error);
+            removeTypingMessageId(placeholderId);
+            return null;
+        }
+    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId]);
+
+    const generateBobSimplifiedQuestion = useCallback(async () => {
+        const bobAgent = agents.find(agent => agent.id === "bob");
+        if (!bobAgent) return;
+
+        const placeholderId = getUniqueMessageId();
+        const placeholder: Message = {
+            id: placeholderId,
+            sender: "ai",
+            agentId: bobAgent.id,
+            text: "...",
+            timestamp: new Date().toISOString(),
+        };
+
+        setMessages(prev => [...prev, placeholder]);
+        addTypingMessageId(placeholderId);
+
+        try {
+            const currentTime = new Date().toISOString();
+            
+            // Get the most recent message (should be Bob's previous question)
+            const lastMessage = messages[messages.length - 1];
+            const lastMessageText = lastMessage?.text || "";
+            
+            const inactivityPrompt = `The user has been silent for a while after you asked them a question. You need to ask a simpler, more accessible version of the question to help them get unstuck.
+
+YOUR PREVIOUS MESSAGE: "${lastMessageText}"
+
+TASK: 
+- Acknowledge that the previous question might have been challenging
+- Break down the question into a simpler, more specific part
+- Ask a more direct, easier question that builds toward the original answer
+- Be encouraging and supportive
+
+Example: "That question might have been a bit complex. Let me try asking it differently - can you just tell me what operation you think we should do first?" or "No worries if that was tricky! Let's start simpler - what do you think this number represents in the problem?"`;
+            
+            const enhancedSystemPrompt = bobAgent.systemPrompt + "\n\n" + inactivityPrompt;
+            const conversationHistory = messages.slice(-3);
+
+            const aiResponse = await aiService.generateResponse(
+                conversationHistory,
+                {
+                    systemPrompt: enhancedSystemPrompt,
+                    model: bobAgent.model,
+                    temperature: 0.8
+                }
+            );
+
+            const finalMessage: Message = {
+                id: placeholderId,
+                sender: "ai",
+                agentId: bobAgent.id,
+                text: aiResponse,
+                timestamp: currentTime,
+            };
+
+            setMessages(prev => prev.map(msg => 
+                msg.id === placeholderId ? finalMessage : msg
+            ));
+            
+            removeTypingMessageId(placeholderId);
+            onNewMessage(finalMessage);
+            
+            return finalMessage;
+        } catch (error) {
+            console.error("Error generating Bob simplified question:", error);
+            removeTypingMessageId(placeholderId);
+            return null;
+        }
+    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId]);
 
     return (
         <div className="chat-container flex-1 flex flex-col h-full overflow-hidden">

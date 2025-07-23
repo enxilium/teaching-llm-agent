@@ -35,9 +35,10 @@ export default function GroupPage() {
     const [allQuestions, setAllQuestions] = useState<Question[]>([]);
     const [loadedQuestions, setLoadedQuestions] = useState(false);
     const [timeElapsed, setTimeElapsed] = useState(0);
-    const [timeLeft, setTimeLeft] = useState(120);
+    const [timeLeft, setTimeLeft] = useState(300); // 5 minutes
     const roundEndedRef = useRef(false);
     const [canSubmit, setCanSubmit] = useState(false);
+    const [canSkip, setCanSkip] = useState(false); // Add state for tracking if skip button can be enabled
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(
         null
     );
@@ -161,7 +162,14 @@ export default function GroupPage() {
 
         const timerId = setInterval(() => {
             setTimeLeft((prev) => {
-                if (prev <= 1) {
+                const newTime = prev - 1;
+                
+                // Enable skip button after 2 minutes (when 3 minutes remain)
+                if (newTime <= 180 && !canSkip) {
+                    setCanSkip(true);
+                }
+                
+                if (newTime <= 1) {
                     roundEndedRef.current = true;
                     setIsQuestioningEnabled(false);
                     const finalAnswerText =
@@ -171,26 +179,32 @@ export default function GroupPage() {
                     });
                     return 0;
                 }
-                return prev - 1;
+                return newTime;
             });
         }, 1000);
 
         return () => clearInterval(timerId);
-    }, [hasSubmittedAnswer, finalAnswer, completeLesson, saveSessionData]);
+    }, [hasSubmittedAnswer, finalAnswer, completeLesson, saveSessionData, canSkip]);
 
     const handleSend = () => {
         setHasSubmittedAnswer(true);
         setIsQuestioningEnabled(true);
-        setTimeLeft(120); // Reset timer to 2 minutes when scenario starts
+        setTimeLeft(300); // Reset timer to 5 minutes when scenario starts
+        setCanSkip(false); // Reset skip button
 
         const submissionText = finalAnswer.trim() || "No answer specified";
+        const reasoning = scratchboardContent.trim();
+        
+        // Format message based on whether reasoning was provided
+        let messageText = `Final Answer: ${submissionText}`;
+        if (reasoning) {
+            messageText += `\n\nReasoning: ${reasoning}`;
+        }
 
         const userFinalAnswer: Message = {
             id: Date.now() * 1000, // Use larger number to avoid conflicts with agent messages
             sender: "user",
-            text: `My final answer is: ${submissionText}\n\nMy reasoning:\n${
-                scratchboardContent.trim() || "[No work shown]"
-            }`,
+            text: messageText,
             timestamp: new Date().toISOString(),
         };
 
@@ -202,6 +216,17 @@ export default function GroupPage() {
         setMessages((prev) => [...prev, message]);
         setAllMessages((prev) => [...prev, message]);
     };
+
+    const handleSkip = useCallback(() => {
+        if (!canSkip || roundEndedRef.current) return;
+        
+        roundEndedRef.current = true;
+        setIsQuestioningEnabled(false);
+        const finalAnswerText = finalAnswer.trim() || "No answer specified";
+        saveSessionData(finalAnswerText, false).finally(() => {
+            completeLesson();
+        });
+    }, [canSkip, finalAnswer, saveSessionData, completeLesson]);
 
     return (
         <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-row overflow-hidden fixed inset-0">
@@ -217,6 +242,8 @@ export default function GroupPage() {
                         timeElapsed={timeElapsed}
                         hasSubmittedAnswer={hasSubmittedAnswer}
                         isMultiScenario={true}
+                        canSkip={canSkip}
+                        onSkip={handleSkip}
                     />
                 )}
                 {currentQuestion && (
