@@ -65,7 +65,7 @@ export default function CompletedPage() {
         const lessonType = flowData?.lessonType;
         switch (lessonType) {
             case "group":
-                return ["bob", "charlie", "alice"];
+                return ["charlie", "alice"];
             case "multi":
                 return ["bob", "alice", "charlie"];
             case "single":
