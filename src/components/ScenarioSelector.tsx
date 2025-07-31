@@ -21,7 +21,7 @@ const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({ onSelected }) => {
         {
             value: "multi",
             label: "Multi",
-            description: "User + Bob (tutor) + one error-prone agent"
+            description: "User + Bob (tutor) + two error-prone agents"
         },
         {
             value: "single",
