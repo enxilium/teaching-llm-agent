@@ -9,7 +9,7 @@ import { Agent, loadAgents } from "@/lib/agents";
 import ProblemDisplay from "@/components/ProblemDisplay";
 import AnswerInput from "@/components/AnswerInput";
 import Scratchpad from "@/components/Scratchpad";
-import Chat from "@/components/Chat";
+import MultiScenarioChat from "@/components/MultiScenarioChat";
 
 interface Question {
     id: number;
@@ -274,7 +274,7 @@ ${userDisplayMessage.text}`,
             </div>
 
             {hasSubmittedAnswer && (
-                <Chat
+                <MultiScenarioChat
                     agents={agents}
                     initialMessages={messages}
                     onNewMessage={handleNewMessage}

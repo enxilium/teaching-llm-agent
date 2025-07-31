@@ -21,12 +21,12 @@ export default function IntroPage() {
             case 'group':
                 return [
                     {
-                        name: "Alice (Arithmetic Gap)",
+                        name: "Alice",
                         avatar: "/pattern_avatar.png",
                         description: "Alice sometimes makes arithmetic mistakes but has strong conceptual understanding. She might mix up numbers or make calculation errors."
                     },
                     {
-                        name: "Charlie (Concept Gap)",
+                        name: "Charlie",
                         avatar: "/logic_avatar.png",
                         description: "Charlie computes things accurately but sometimes misunderstands the underlying concepts. He may apply formulas incorrectly despite doing the math correctly."
                     }
@@ -39,12 +39,12 @@ export default function IntroPage() {
                         description: "Bob is a supportive math tutor who will guide the discussion and provide feedback on your answers."
                     },
                     {
-                        name: "Alice (Arithmetic Gap)",
+                        name: "Alice",
                         avatar: "/pattern_avatar.png",
                         description: "Alice sometimes makes arithmetic mistakes but has strong conceptual understanding. She might mix up numbers or make calculation errors."
                     },
                     {
-                        name: "Charlie (Concept Gap)",
+                        name: "Charlie",
                         avatar: "/logic_avatar.png",
                         description: "Charlie computes things accurately but sometimes misunderstands the underlying concepts. He may apply formulas incorrectly despite doing the math correctly."
                     }
@@ -90,12 +90,13 @@ export default function IntroPage() {
                         The study has the following stages:
                     </p>
                     <ol className="list-decimal pl-6 mb-4 space-y-2">
-                        <li><strong>Pre-Test:</strong> Answer a few practice problems to assess your initial understanding.</li>
-                        <li><strong>Lesson:</strong> {getScenarioDescription()}</li>
-                        <li><strong>Break:</strong> Take a short break with a tetris game.</li>
-                        <li><strong>Post-Test:</strong> Answer questions similar to the pre-test to measure your progress.</li>
-                        <li><strong>Final Test:</strong> Complete a final set of questions that test your understanding.</li>
-                        <li><strong>Survey:</strong> Share your experience and feedback.</li>
+                        <li>Complete a pre-test survey to share your background with mathematics.</li>
+                        <li>Answer a few practice problems to assess your initial understanding.</li>
+                        <li>{getScenarioDescription()}</li>
+                        <li>Take a short break with a tetris game.</li>
+                        <li>Answer questions similar to the pre-test to measure your progress.</li>
+                        <li>Complete a final set of questions that test your understanding.</li>
+                        <li>Share your experience and feedback.</li>
                     </ol>
                 </div>
 
@@ -146,7 +147,7 @@ export default function IntroPage() {
                         onClick={completeIntro}
                         className="px-8 py-3 rounded-lg bg-purple-600 hover:bg-purple-700 text-white"
                     >
-                        Continue to Pre-Test
+                        Continue to Survey
                     </button>
                 </div>
             </div>

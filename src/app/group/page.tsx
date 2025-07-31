@@ -8,7 +8,7 @@ import { Agent, loadAgents } from "@/lib/agents";
 import ProblemDisplay from "@/components/ProblemDisplay";
 import AnswerInput from "@/components/AnswerInput";
 import Scratchpad from "@/components/Scratchpad";
-import Chat from "@/components/Chat";
+import GroupScenarioChat from "@/components/GroupScenarioChat";
 
 interface Question {
     id: number;
@@ -266,12 +266,12 @@ export default function GroupPage() {
             </div>
 
             {hasSubmittedAnswer && (
-                <Chat
+                <GroupScenarioChat
                     agents={agents}
                     initialMessages={messages}
                     onNewMessage={handleNewMessage}
-                    isQuestioningEnabled={true}
-                    setIsQuestioningEnabled={() => {}}
+                    isQuestioningEnabled={isQuestioningEnabled}
+                    setIsQuestioningEnabled={setIsQuestioningEnabled}
                     triggerInitialResponse={true}
                     currentQuestion={currentQuestion || undefined}
                 />

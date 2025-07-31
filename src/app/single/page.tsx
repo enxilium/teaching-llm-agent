@@ -8,7 +8,7 @@ import { prepareMessagesForStorage } from "@/utils/messageUtils";
 import ProblemDisplay from "@/components/ProblemDisplay";
 import AnswerInput from "@/components/AnswerInput";
 import Scratchpad from "@/components/Scratchpad";
-import Chat from "@/components/Chat";
+import SingleScenarioChat from "@/components/SingleScenarioChat";
 import { Agent, loadAgents } from "@/lib/agents";
 
 // Define the question type to include multiple choice options
@@ -239,13 +239,13 @@ export default function SinglePage() {
                 />
             </div>
             {hasSubmittedAnswer && (
-                <Chat
+                <SingleScenarioChat
                     key="single-chat" // Add a stable key
                     agents={agents}
                     initialMessages={initialMessages}
                     onNewMessage={handleNewMessage}
                     isQuestioningEnabled={true}
-                    setIsQuestioningEnabled={() => {}} // Chat manages this internally now
+                    setIsQuestioningEnabled={() => {}} // SingleScenarioChat manages this internally now
                     triggerInitialResponse={true}
                     currentQuestion={currentQuestion || undefined}
                 />

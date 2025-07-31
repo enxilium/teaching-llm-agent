@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { useFlow } from "@/context/FlowContext";
 import CaptchaComponent from "@/components/Captcha";
+import ScenarioSelector from "@/components/ScenarioSelector";
 
 export default function Terms() {
     const { agreeToTerms } = useFlow();
@@ -68,6 +69,11 @@ export default function Terms() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8">
             <div className="max-w-3xl mx-auto text-white">
+                {/* Development Scenario Selector - Only shows in development */}
+                <div className="flex justify-center mb-6">
+                    <ScenarioSelector />
+                </div>
+
                 <h1 className="text-3xl font-bold text-white text-center mb-6">
                     Terms and Conditions
                 </h1>

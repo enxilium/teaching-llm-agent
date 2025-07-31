@@ -1,6 +1,7 @@
 export type FlowStage =
     | "terms"
     | "intro"
+    | "pre-test-survey"
     | "pre-test"
     | "lesson"
     | "tetris-break"
@@ -63,6 +64,10 @@ export interface SurveyData {
     age?: string;
     gender?: string;
     educationLevel?: string;
+    preTestMathInterest?: string; // Pre-test math interest
+    postTestMathInterest?: string; // Post-test math interest
+    // Legacy field for backward compatibility
+    mathInterest?: string;
 }
 
 export interface Question {

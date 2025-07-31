@@ -30,6 +30,7 @@ interface FlowContextType {
     testQuestionIndex: number;
     hitId: string;
     assignmentId: string;
+    flowData: ExperimentData; // Add access to full flow data
 
     // Session management methods
     saveSessionData: (sessionData: SessionData) => void;
@@ -39,6 +40,7 @@ interface FlowContextType {
     // Flow progression methods
     agreeToTerms: () => void;
     completeIntro: () => void;
+    completePreTestSurvey: () => void;
     completePreTest: () => void;
     completeLesson: () => void;
     completeTetrisBreak: () => void;
@@ -48,6 +50,9 @@ interface FlowContextType {
 
     // Final data submission method
     submitAllDataToDatabase: () => Promise<void>;
+
+    // Development only - scenario override
+    overrideLessonType: (lessonType: LessonType) => void;
 }
 
 // Default flow data
@@ -77,6 +82,7 @@ const FlowContext = createContext<FlowContextType>({
     testQuestionIndex: 0,
     hitId: "",
     assignmentId: "",
+    flowData: defaultFlowData,
 
     saveSessionData: () => {},
     saveTestData: () => {},
@@ -84,6 +90,7 @@ const FlowContext = createContext<FlowContextType>({
 
     agreeToTerms: () => {},
     completeIntro: () => {},
+    completePreTestSurvey: () => {},
     completePreTest: () => {},
     completeLesson: () => {},
     completeTetrisBreak: () => {},
@@ -91,6 +98,7 @@ const FlowContext = createContext<FlowContextType>({
     completeFinalTest: async () => true,
     resetFlow: () => {},
     submitAllDataToDatabase: async () => {},
+    overrideLessonType: () => {},
 });
 
 // Hook for accessing the flow context
@@ -117,6 +125,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
     // Clear flow and start fresh
     const resetFlow = useCallback(() => {
+        console.log("🔄 RESETFLOW CALLED - Starting fresh flow initialization");
+        
         // Extract workerId, hitId, and assignmentId from URL query parameters if available
         let newUserId = "test" + Math.floor(Math.random() * 10000); // Default fallback for development
         let hitId = "hit" + Math.floor(Math.random() * 10000); // Default fallback for hitId
@@ -222,9 +232,53 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         }
     }, [router]);
 
+    // Development only - override lesson type
+    const overrideLessonType = useCallback((newLessonType: LessonType) => {
+        console.log(`🔧 DEVELOPMENT OVERRIDE: Changing lesson type from ${flowData.lessonType} to ${newLessonType}`);
+        
+        const updatedFlowData = {
+            ...flowData,
+            lessonType: newLessonType,
+        };
+        
+        setFlowData(updatedFlowData);
+        
+        // Update localStorage
+        if (typeof window !== "undefined") {
+            localStorage.setItem("flowData", JSON.stringify(updatedFlowData));
+        }
+    }, [flowData]);
+
     // Initialize or reset flow on load
     useEffect(() => {
         if (typeof window !== "undefined" && !initialized) {
+            console.log("🚀 Initializing FlowContext...");
+            
+            // Try to restore from localStorage first
+            try {
+                const storedFlowData = localStorage.getItem("flowData");
+                if (storedFlowData) {
+                    const parsedData = JSON.parse(storedFlowData);
+                    console.log("📋 Found existing flow data in localStorage:", parsedData);
+                    
+                    // Validate that the stored data has essential fields
+                    if (parsedData.userId && parsedData.currentStage) {
+                        console.log(`✅ Restoring flow data - Stage: ${parsedData.currentStage}, User: ${parsedData.userId}`);
+                        setFlowData(parsedData);
+                        setInitialized(true);
+                        return;
+                    } else {
+                        console.log("⚠️ Stored flow data is incomplete, resetting...");
+                    }
+                } else {
+                    console.log("📋 No existing flow data found, starting fresh");
+                }
+            } catch (e) {
+                console.error("❌ Failed to parse stored flow data:", e);
+            }
+            
+            // If we get here, either no stored data or invalid data - reset flow
+                    console.log("� Attempting navigation to /pretest");
             resetFlow();
             setInitialized(true);
         }
@@ -559,31 +613,50 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         }, 0);
     };
 
-    // Improve saveSurveyData with better debugging
+    // Improve saveSurveyData with better debugging and data merging
     const saveSurveyData = useCallback((data: SurveyData) => {
         console.log("💾 Saving survey data:", data);
 
         // Create timestamp for when survey was completed
         const timestamp = new Date().toISOString();
-        const surveyWithTimestamp = { ...data, completedAt: timestamp };
+        
+        // Merge with existing survey data instead of replacing it
+        setFlowData((prev) => {
+            const existingSurveyData = prev.surveyData || {};
+            const mergedSurveyData = {
+                ...existingSurveyData,
+                ...data,
+                completedAt: timestamp,
+            };
+            
+            console.log("💾 Existing survey data:", existingSurveyData);
+            console.log("💾 New survey data:", data);
+            console.log("💾 Merged survey data:", mergedSurveyData);
+            
+            // Special debug for math interest fields
+            if (mergedSurveyData.preTestMathInterest || mergedSurveyData.postTestMathInterest) {
+                console.log("🔍 Math Interest Debug:", {
+                    preTest: mergedSurveyData.preTestMathInterest,
+                    postTest: mergedSurveyData.postTestMathInterest,
+                    legacy: mergedSurveyData.mathInterest
+                });
+            }
+            
+            const updated = { ...prev, surveyData: mergedSurveyData };
 
-        // CRITICAL FIX: Update localStorage FIRST (synchronously) before React state update
-        if (typeof window !== "undefined") {
-            try {
-                // Create dedicated backup of survey data
-                localStorage.setItem(
-                    "surveyData_backup",
-                    JSON.stringify(surveyWithTimestamp)
-                );
-                console.log("✅ Created survey data backup in localStorage");
+            // Update localStorage immediately
+            if (typeof window !== "undefined") {
+                try {
+                    // Create dedicated backup of survey data
+                    localStorage.setItem(
+                        "surveyData_backup",
+                        JSON.stringify(mergedSurveyData)
+                    );
+                    console.log("✅ Created survey data backup in localStorage");
 
-                // Also update the full flowData in localStorage with the new survey data
-                const currentFlowData = localStorage.getItem("flowData");
-                if (currentFlowData) {
-                    const parsedFlowData = JSON.parse(currentFlowData);
+                    // Also update the full flowData in localStorage with the new survey data
                     const updatedFlowData = {
-                        ...parsedFlowData,
-                        surveyData: surveyWithTimestamp,
+                        ...updated,
                         _lastUpdated: timestamp,
                     };
                     localStorage.setItem(
@@ -591,39 +664,11 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
                         JSON.stringify(updatedFlowData)
                     );
                     console.log(
-                        "✅ Updated flowData in localStorage with survey data"
+                        "✅ Updated flowData in localStorage with merged survey data"
                     );
-                }
-            } catch (e) {
-                console.error(
-                    "Failed to create survey backup in localStorage:",
-                    e
-                );
-            }
-        }
-
-        // Update flow context with survey data
-        setFlowData((prev) => {
-            const updated = { ...prev, surveyData: surveyWithTimestamp };
-
-            // Already updated localStorage above, but double-check here
-            if (typeof window !== "undefined") {
-                try {
-                    // Verify localStorage was updated correctly
-                    const storedSurveyData =
-                        localStorage.getItem("surveyData_backup");
-                    if (!storedSurveyData) {
-                        console.warn(
-                            "Survey data not found in localStorage, saving again"
-                        );
-                        localStorage.setItem(
-                            "surveyData_backup",
-                            JSON.stringify(surveyWithTimestamp)
-                        );
-                    }
                 } catch (e) {
                     console.error(
-                        "Failed to verify localStorage survey data:",
+                        "Failed to create survey backup in localStorage:",
                         e
                     );
                 }
@@ -635,62 +680,94 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
     // Stage transition methods
     const agreeToTerms = () => {
+        console.log("🔄 agreeToTerms called - navigating to intro");
+        
         setFlowData((prev) => ({
             ...prev,
             currentStage: "intro",
         }));
-
+        console.log("📊 Stage updated to: intro");
+        
         router.push("/intro");
+        console.log("✅ Navigation to intro initiated");
     };
 
-    // Handle the transition from intro to pre-test
+    // Handle the transition from intro to pre-test-survey
     const completeIntro = () => {
+        console.log("🔄 completeIntro called - navigating to survey");
+        
         setFlowData((prev) => ({
             ...prev,
-            currentStage: "pre-test",
+            currentStage: "pre-test-survey",
         }));
-
-        router.push("/pretest");
+        console.log("📊 Stage updated to: pre-test-survey");
+        
+        router.push("/pretest-survey");
+        console.log("✅ Navigation to pretest-survey initiated");
     };
 
-    // Simplified completePreTest function
+    // Handle the transition from pre-test-survey to pre-test
+    const completePreTestSurvey = () => {
+        console.log("🔄 completePreTestSurvey called");
+        console.log("📊 Current stage before update:", flowData.currentStage);
+        console.log("📍 Current URL:", typeof window !== "undefined" ? window.location.href : "N/A");
+        
+        // Navigate first, then update the stage to avoid FlowProtection conflicts
+        console.log("Attempting navigation to /pretest");
+        
+        try {
+            // Update stage immediately to avoid FlowProtection conflicts
+            setFlowData((prev) => {
+                const updated = {
+                    ...prev,
+                    currentStage: "pre-test" as const,
+                };
+                console.log("📊 Stage updated to:", updated.currentStage);
+                
+                // Save to localStorage immediately
+                if (typeof window !== "undefined") {
+                    localStorage.setItem("flowData", JSON.stringify(updated));
+                    console.log("💾 Saved updated flow data to localStorage");
+                }
+                
+                return updated;
+            });
+            
+            // Navigate after a short delay
+            setTimeout(() => {
+                router.push("/pretest");
+                console.log("✅ router.push executed");
+            }, 100);
+            
+        } catch (error) {
+            console.error("❌ Router navigation failed:", error);
+            if (typeof window !== "undefined") {
+                console.log("🔄 Using window.location.href fallback");
+                window.location.href = "/pretest";
+            }
+        }
+    };
+
     const completePreTest = () => {
         console.log("Starting pre-test completion transition");
         
         // Extract the predetermined lesson type
-        const selectedLessonType = flowData.lessonType || "solo"; // Default to solo if not set
+        const selectedLessonType = flowData.lessonType || "solo";
         console.log(`🎯 Using predetermined lesson type: ${selectedLessonType}`);
-        console.log(`🔄 Current flowData:`, {
-            currentStage: flowData.currentStage,
-            lessonType: flowData.lessonType,
-            userId: flowData.userId
-        });
-
-        // Update state
+        
         setFlowData((prev) => ({
             ...prev,
             currentStage: "lesson",
         }));
-
+        
         // Update localStorage
         if (typeof window !== "undefined") {
             localStorage.setItem("currentStage", "lesson");
             console.log(`💾 Updated localStorage currentStage to: lesson`);
         }
-
-        // Navigate with delay to allow state to update
-        setTimeout(() => {
-            console.log(`🚀 Attempting to navigate to: /${selectedLessonType}`);
-            try {
-                router.push(`/${selectedLessonType}`);
-                console.log(`✅ Navigation command executed successfully`);
-            } catch (error) {
-                console.error("❌ Navigation error:", error);
-                // Fallback direct navigation
-                console.log(`🔄 Attempting fallback navigation to: /${selectedLessonType}`);
-                window.location.href = `/${selectedLessonType}`;
-            }
-        }, 300);
+        
+        router.push(`/${selectedLessonType}`);
+        console.log(`✅ Navigation to ${selectedLessonType} initiated`);
     };
 
     const completeLesson = () => {
@@ -764,11 +841,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    // Simplified completePostTest function
     const completePostTest = () => {
         console.log("Starting post-test completion transition");
 
-        // Update state
         setFlowData((prev) => ({
             ...prev,
             currentStage: "final-test",
@@ -778,66 +853,69 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         if (typeof window !== "undefined") {
             localStorage.setItem("currentStage", "final-test");
         }
-
-        // Navigate with delay
-        setTimeout(() => {
-            try {
-                router.push("/finaltest");
-            } catch (error) {
-                console.error("Navigation error:", error);
-                // Fallback direct navigation
-                window.location.href = "/finaltest";
-            }
-        }, 300);
+        console.log("📊 Stage updated to: final-test");
+        
+        router.push("/finaltest");
+        console.log("✅ Navigation to finaltest initiated");
     };
 
     const completeTetrisBreak = () => {
+        console.log("Starting tetris break completion transition");
+        
         setFlowData((prev) => ({
             ...prev,
             currentStage: "post-test",
         }));
-
+        console.log("📊 Stage updated to: post-test");
+        
         router.push("/posttest");
+        console.log("✅ Navigation to posttest initiated");
     };
 
-    // The most important method - store everything to database
     const completeFinalTest = async () => {
-        console.log(
-            "completeFinalTest called - starting final test completion process"
-        );
+        console.log("completeFinalTest called - starting final test completion process");
 
-        try {
-            // Mark flow as completed with proper type assertion
-            setFlowData((prev) => ({
-                ...prev,
-                currentStage: "completed" as FlowStage, // Add explicit type cast here
-            }));
+        setFlowData((prev) => ({
+            ...prev,
+            currentStage: "completed" as FlowStage,
+        }));
+        console.log("📊 Stage updated to: completed");
+        
+        router.push("/completed");
+        console.log("✅ Navigation to completed page initiated");
 
-            // IMPORTANT: Just navigate to completed page WITHOUT writing to database
-            // All data will be saved after survey submission
-            setTimeout(() => {
-                router.push("/completed");
-            }, 300);
-
-            return true; // Return success boolean as defined in interface
-        } catch (error) {
-            console.error("Error completing final test:", error);
-            return false; // Return failure boolean in case of error
-        }
+        return true; // Return success boolean as defined in interface
     };
 
     // Update the submitAllDataToDatabase function with better logging
     const submitAllDataToDatabase = async () => {
-        if (!flowData) {
-            console.error("No flow data available for submission");
-            return;
-        }
-
         console.log("💾 Attempting to submit all data to database...");
 
         try {
+            // CRITICAL FIX: Always read the latest flowData from localStorage first
+            // This ensures we get the most up-to-date data, especially survey data
+            let currentFlowData = flowData;
+            if (typeof window !== "undefined") {
+                try {
+                    const storedFlowData = localStorage.getItem("flowData");
+                    if (storedFlowData) {
+                        const parsedFlowData = JSON.parse(storedFlowData);
+                        console.log("📋 Using refreshed flow data from localStorage");
+                        currentFlowData = parsedFlowData;
+                    }
+                } catch (e) {
+                    console.error("Failed to read latest flowData from localStorage:", e);
+                    console.log("📋 Falling back to state flowData");
+                }
+            }
+
+            if (!currentFlowData) {
+                console.error("No flow data available for submission");
+                return;
+            }
+
             // Check if we have survey data in the flow context
-            let surveyDataToSubmit = flowData.surveyData;
+            let surveyDataToSubmit = currentFlowData.surveyData;
 
             // If no survey data in flow context, try to recover from dedicated backup
             if (!surveyDataToSubmit) {
@@ -860,31 +938,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
                         console.error("Failed to parse backup survey data:", e);
                     }
                 }
-
-                // If still no survey data, try to get from flowData in localStorage
-                if (!surveyDataToSubmit && typeof window !== "undefined") {
-                    try {
-                        const storedFlowData = localStorage.getItem("flowData");
-                        if (storedFlowData) {
-                            const parsedFlowData = JSON.parse(storedFlowData);
-                            if (parsedFlowData.surveyData) {
-                                surveyDataToSubmit = parsedFlowData.surveyData;
-                                console.log(
-                                    "✅ Recovered survey data from localStorage flowData"
-                                );
-                            }
-                        }
-                    } catch (e) {
-                        console.error(
-                            "Failed to parse localStorage flowData:",
-                            e
-                        );
-                    }
-                }
             }
 
             // Get sessionData and ensure it's an array
-            let sessionDataToSubmit = flowData.sessionData || [];
+            let sessionDataToSubmit = currentFlowData.sessionData || [];
 
             // WARNING: Check if sessionData is empty - this shouldn't happen unless something went wrong
             if (!sessionDataToSubmit || sessionDataToSubmit.length === 0) {
@@ -973,11 +1030,11 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
                 };
             });
 
-            // Check if questionResponses exists in flowData.questions
+            // Check if questionResponses exists in currentFlowData.questions
             if (
-                flowData.questions &&
-                Array.isArray(flowData.questions) &&
-                flowData.questions.length > 0
+                currentFlowData.questions &&
+                Array.isArray(currentFlowData.questions) &&
+                currentFlowData.questions.length > 0
             ) {
                 // Create a dedicated sessionData entry for questionResponses
                 console.log("📝 Adding questionResponses to sessionData");
@@ -989,7 +1046,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
                     startTime: new Date(),
                     endTime: new Date(),
                     duration: 0,
-                    finalAnswer: JSON.stringify(flowData.questions),
+                    finalAnswer: JSON.stringify(currentFlowData.questions),
                     scratchboardContent: "",
                     messages: [], // Empty messages array
                     isCorrect: true,
@@ -1001,24 +1058,48 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
             // Prepare the complete data payload - no separate messages or questionResponses fields
             const completeData = {
-                userId: flowData.userId,
-                testId: flowData.testId,
-                hitId: flowData.hitId,
-                assignmentId: flowData.assignmentId,
+                userId: currentFlowData.userId,
+                testId: currentFlowData.testId,
+                hitId: currentFlowData.hitId,
+                assignmentId: currentFlowData.assignmentId,
                 completedAt: new Date().toISOString(),
                 surveyData: surveyDataToSubmit || {
                     error: "Survey data not found",
                     recoveryAttempted: true,
                 },
-                sessionId: flowData.sessionId,
-                testData: flowData.testData || [],
+                sessionId: currentFlowData.sessionId,
+                testData: currentFlowData.testData || [],
                 sessionData: sessionDataToSubmit,
-                lessonType: flowData.lessonType,
+                lessonType: currentFlowData.lessonType,
             };
 
-            console.log("📤 Submitting with data for user:", flowData.userId);
-            console.log("📤 Scenario type (lessonType):", flowData.lessonType);
+            console.log("📤 Submitting with data for user:", currentFlowData.userId);
+            console.log("📤 Scenario type (lessonType):", currentFlowData.lessonType);
             console.log("📤 SessionData entries:", sessionDataToSubmit.length);
+            
+            // CRITICAL DEBUG: Log the exact survey data being submitted
+            console.log("🔍 SURVEY DATA DEBUG - Full object being submitted:", surveyDataToSubmit);
+            if (surveyDataToSubmit) {
+                console.log("🔍 Survey Data Fields:", Object.keys(surveyDataToSubmit));
+                console.log("🔍 Survey Data Values:", Object.values(surveyDataToSubmit));
+                console.log("🔍 Survey Data JSON:", JSON.stringify(surveyDataToSubmit, null, 2));
+            } else {
+                console.error("❌ CRITICAL: surveyDataToSubmit is null or undefined!");
+            }
+            
+            // Debug math interest data specifically
+            if (surveyDataToSubmit) {
+                console.log("🔍 Survey Data Debug:", {
+                    hasPreTestMathInterest: !!surveyDataToSubmit.preTestMathInterest,
+                    hasPostTestMathInterest: !!surveyDataToSubmit.postTestMathInterest,
+                    preTestMathInterest: surveyDataToSubmit.preTestMathInterest,
+                    postTestMathInterest: surveyDataToSubmit.postTestMathInterest,
+                    legacyMathInterest: surveyDataToSubmit.mathInterest,
+                    allSurveyFields: Object.keys(surveyDataToSubmit)
+                });
+            } else {
+                console.warn("⚠️ No survey data to submit!");
+            }
 
             // Additional debug logging - log unique question IDs to help debug
             if (sessionDataToSubmit.length > 0) {
@@ -1047,7 +1128,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
                     localStorage.setItem(
                         "submitted_data_backup",
                         JSON.stringify({
-                            flowData,
+                            flowData: currentFlowData,
                             submittedAt: new Date().toISOString(),
                         })
                     );
@@ -1065,7 +1146,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     };
 
     // Memoize the context value to prevent unnecessary re-renders
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     const value = useMemo(
         () => ({
             userId,
@@ -1075,6 +1156,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             testQuestionIndex: testQuestionIndex || 0,
             hitId: hitId || '',
             assignmentId: assignmentId || '',
+            flowData, // Add flowData to the context value
 
             saveSessionData,
             saveTestData,
@@ -1082,6 +1164,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
             agreeToTerms,
             completeIntro,
+            completePreTestSurvey,
             completePreTest,
             completeLesson,
             completeTetrisBreak,
@@ -1089,6 +1172,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             completeFinalTest,
             resetFlow,
             submitAllDataToDatabase,
+            overrideLessonType,
         }),
         [
             currentStage,
@@ -1098,8 +1182,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             testQuestionIndex,
             hitId,
             assignmentId,
+            flowData, // Add flowData to dependencies
             agreeToTerms,
             completeIntro,
+            completePreTestSurvey,
             completePreTest,
             completeLesson,
             completeTetrisBreak,
@@ -1110,6 +1196,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             saveSurveyData,
             saveTestData,
             submitAllDataToDatabase,
+            overrideLessonType,
         ]
     );
 
