@@ -38,7 +38,7 @@ export default function GroupPage() {
     const [timeLeft, setTimeLeft] = useState(300); // 5 minutes
     const roundEndedRef = useRef(false);
     const [canSubmit, setCanSubmit] = useState(false);
-    const [canSkip, setCanSkip] = useState(false); // Add state for tracking if skip button can be enabled
+    const [canSkip, setCanSkip] = useState(process.env.NODE_ENV === "development"); // Enable immediately in development
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(
         null
     );
@@ -164,8 +164,8 @@ export default function GroupPage() {
             setTimeLeft((prev) => {
                 const newTime = prev - 1;
                 
-                // Enable skip button after 2 minutes (when 3 minutes remain)
-                if (newTime <= 180 && !canSkip) {
+                // Enable skip button after 2 minutes (when 3 minutes remain) or immediately in development
+                if ((newTime <= 180 && !canSkip) || (process.env.NODE_ENV === "development" && !canSkip)) {
                     setCanSkip(true);
                 }
                 
@@ -190,7 +190,7 @@ export default function GroupPage() {
         setHasSubmittedAnswer(true);
         setIsQuestioningEnabled(true);
         setTimeLeft(300); // Reset timer to 5 minutes when scenario starts
-        setCanSkip(false); // Reset skip button
+        setCanSkip(process.env.NODE_ENV === "development"); // Reset skip button, enable immediately in development
 
         const submissionText = finalAnswer.trim() || "No answer specified";
         const reasoning = scratchboardContent.trim();
