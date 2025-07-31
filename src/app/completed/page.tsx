@@ -65,23 +65,9 @@ export default function CompletedPage() {
         const lessonType = flowData?.lessonType;
         switch (lessonType) {
             case "group":
-                return ["bob", "charlie", "alice"];
+                return ["charlie", "alice"];
             case "multi":
-                // For multi scenario, check session data to see which agents actually participated
-                const sessionData = flowData?.sessionData?.[0]; // Get first session data
-                if (sessionData?.messages) {
-                    const agentIds = new Set<string>();
-                    sessionData.messages.forEach((message: any) => {
-                        if (message.sender === "ai" && message.agentId) {
-                            agentIds.add(message.agentId);
-                        }
-                    });
-                    console.log("🤖 Multi scenario agents detected:", Array.from(agentIds));
-                    return Array.from(agentIds);
-                }
-                // Fallback: Bob is always present in multi scenario
-                console.log("🤖 Multi scenario fallback: Bob only");
-                return ["bob"];
+                return ["bob", "charlie", "alice"];
             case "single":
                 return ["bob"];
             case "solo":
