@@ -39,7 +39,7 @@ export default function PreTestSurveyPage() {
         <div className="min-h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-8">
             <div className="max-w-2xl mx-auto text-white">
                 <h1 className="text-3xl font-bold text-center mb-8">
-                    Pre-Test Survey
+                    Background Survey
                 </h1>
                 
                 <div className="bg-white bg-opacity-10 rounded-xl p-8 shadow-lg">
@@ -85,7 +85,7 @@ export default function PreTestSurveyPage() {
                                 }`}
                                 disabled={!mathInterest}
                             >
-                                Continue to Pre-Test
+                                Continue to Practice Questions
                             </button>
                         </div>
                     </form>

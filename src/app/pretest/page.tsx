@@ -100,7 +100,7 @@ export default function PreTestPage() {
                 <div className="bg-white bg-opacity-10 rounded-xl p-8 mb-6">
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-2xl font-bold text-white">
-                            Pre-Test: Question {currentQuestionIndex + 1} of {allQuestions.length}
+                            Practice Question {currentQuestionIndex + 1} of {allQuestions.length}
                         </h1>
                         <div className="text-white text-sm">
                             Progress: {currentQuestionIndex + 1} / {allQuestions.length}
@@ -149,7 +149,7 @@ export default function PreTestPage() {
                                 disabled={!hasAnsweredCurrent}
                                 className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg"
                             >
-                                Submit Pre-Test
+                                Submit Practice
                             </button>
                         )}
                     </div>

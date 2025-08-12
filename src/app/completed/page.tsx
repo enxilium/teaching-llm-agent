@@ -423,8 +423,8 @@ export default function CompletedPage() {
                                     {agentsPresent.map((agentId) => {
                                         const agentNames = {
                                             bob: "Bob (the tutor)",
-                                            charlie: "Charlie (concept-focused student)",
-                                            alice: "Alice (calculation-focused student)"
+                                            charlie: "Charlie",
+                                            alice: "Alice"
                                         };
                                         
                                         const agentName = agentNames[agentId as keyof typeof agentNames];
