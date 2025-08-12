@@ -12,11 +12,6 @@ const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({ onSelected }) => {
     const { lessonType, overrideLessonType } = useFlow();
     const [selectedScenario, setSelectedScenario] = useState<LessonType | "">(lessonType || "");
 
-    // Only show in development environment
-    if (process.env.NODE_ENV !== "development") {
-        return null;
-    }
-
     const scenarios: { value: LessonType; label: string; description: string }[] = [
         {
             value: "group",
@@ -26,7 +21,7 @@ const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({ onSelected }) => {
         {
             value: "multi",
             label: "Multi",
-            description: "User + Bob (tutor) + one error-prone agent"
+            description: "User + Bob (tutor) + two error-prone agents"
         },
         {
             value: "single",

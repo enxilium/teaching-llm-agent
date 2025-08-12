@@ -40,7 +40,7 @@ const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
                             onClick={onSkip}
                             className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded-lg text-sm font-semibold transition-colors"
                         >
-                            Move to Next Stage
+                            {process.env.NODE_ENV === "development" ? "Skip (Dev)" : "Move to Next Stage"}
                         </button>
                     )}
                 </div>
