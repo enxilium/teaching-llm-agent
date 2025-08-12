@@ -756,7 +756,7 @@ IMPORTANT:
 
     const getAgentDisplayInfo = (msg: Message) => {
         if (msg.sender === "user") {
-            return { name: "You", avatar: "user.png" };
+            return { name: "User (You)", avatar: "user.png" };
         }
         
         const agent = agents.find(a => a.id === msg.agentId);

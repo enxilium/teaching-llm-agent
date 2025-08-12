@@ -1662,7 +1662,7 @@ The user has just sent a message. As Bob the tutor, first acknowledge what the u
     }, [input, handleUserMessage, safeSetTooltipMessage, safeSetShowTooltip, createManagedTimeout, cancelOngoingResponses]);
 
     const getAgentInfo = (agentId: string | null | undefined) => {
-        if (!agentId) return { name: "User", avatar: "user_avatar.svg" };
+        if (!agentId) return { name: "User (You)", avatar: "user_avatar.svg" };
         const agent = agents.find((a) => a.id === agentId);
         return {
             name: agent?.name || "Bot",

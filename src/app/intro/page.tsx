@@ -15,7 +15,7 @@ export default function IntroPage() {
                     {
                         name: "Bob (Tutor)",
                         avatar: "/tutor_avatar.svg",
-                        description: "Bob is a supportive math tutor who will give you personalized feedback on your answers and help you understand the concepts. You can ask Bob questions during the lesson to help you prepare for the test."
+                        description: "Bob is a supportive math tutor who will give you personalized feedback on your answers and help you understand the concepts. You can ask Bob questions during the lesson to help you prepare for later questions."
                     }
                 ];
             case 'group':
@@ -90,11 +90,11 @@ export default function IntroPage() {
                         The study has the following stages:
                     </p>
                     <ol className="list-decimal pl-6 mb-4 space-y-2">
-                        <li>Complete a pre-test survey to share your background with mathematics.</li>
+                        <li>Complete a survey to share your background with mathematics.</li>
                         <li>Answer a few practice problems to assess your initial understanding.</li>
                         <li>{getScenarioDescription()}</li>
                         <li>Take a short break with a tetris game.</li>
-                        <li>Answer questions similar to the pre-test to measure your progress.</li>
+                        <li>Answer questions similar to the practice problems to measure your progress.</li>
                         <li>Complete a final set of questions that test your understanding.</li>
                         <li>Share your experience and feedback.</li>
                     </ol>
@@ -138,7 +138,7 @@ export default function IntroPage() {
                         <li>Please do not refresh the page or use browser back/forward buttons</li>
                         <li>Do not take screenshots or use external tools</li>
                         <li>Give your best effort on all problems</li>
-                        <li>Your performance on the tests does not affect your compensation</li>
+                        <li>Your performance on the problems does not affect your compensation</li>
                     </ul>
                 </div>
                 

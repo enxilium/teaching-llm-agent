@@ -83,14 +83,14 @@ export default function Terms() {
                         ability to solve multiple choice mathematical problems.
                         Researchers will vary the types of information offered
                         to different participants in a Lesson round, and then
-                        study how they answer similar questions in a Test round.
+                        study how they answer similar questions in a final Test round.
                     </p>
 
                     <p className="mb-4">
                         In this task, you will solve multiple-choice math
                         problems about exponents. After some practice questions,
                         you will receive feedback in a &quot;Lesson&quot; round, then move
-                        on to more similar questions in a &quot;Test&quot; round. The
+                        on to more similar questions in a final &quot;Test&quot; round. The
                         problems are similar to those commonly found on
                         standardized tests.
                     </p>
