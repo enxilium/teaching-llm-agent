@@ -41,8 +41,6 @@ const MultiScenarioChat: React.FC<MultiScenarioChatProps> = ({
     const [showTooltip, setShowTooltip] = useState(false);
     const [tooltipMessage, setTooltipMessage] = useState("");
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const interventionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastQuestioningAgent = useRef<string | null>(null); // Track which agent asked the last question
     const followUpInProgressRef = useRef(false);
     const followUpCountRef = useRef(0); // Track follow-up rounds
@@ -64,17 +62,6 @@ const MultiScenarioChat: React.FC<MultiScenarioChatProps> = ({
         console.log("🧹 MultiScenarioChat component cleanup initiated");
         isUnmountedRef.current = true;
         agentResponseInProgressRef.current = false;
-        
-        // Clear all timers
-        if (interventionTimeoutRef.current) {
-            clearTimeout(interventionTimeoutRef.current);
-            interventionTimeoutRef.current = null;
-        }
-        
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
         
         // Clear all pending timeouts
         pendingTimeoutsRef.current.forEach(timeout => {
@@ -270,37 +257,6 @@ const MultiScenarioChat: React.FC<MultiScenarioChatProps> = ({
         }
     };
 
-    // Inactivity timer functions
-    const startInactivityTimer = useCallback((questioningAgent?: string) => {
-        if (isUnmountedRef.current) return;
-        
-        // Clear any existing timer
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
-        
-        // Store which agent asked the question (for multi scenario)
-        if (questioningAgent) {
-            lastQuestioningAgent.current = questioningAgent;
-        }
-        
-        // Start 1-minute inactivity timer
-        inactivityTimeoutRef.current = createManagedTimeout(() => {
-            if (!isUnmountedRef.current && !agentResponseInProgressRef.current) {
-                console.log("⏰ Inactivity timeout triggered");
-                handleInactivity();
-            }
-        }, 60000); // 1 minute
-    }, [createManagedTimeout]);
-
-    const clearInactivityTimer = useCallback(() => {
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
-    }, []);
-
     // Function to cancel ongoing agent responses when user interrupts
     const cancelOngoingResponses = useCallback(() => {
         console.log("🚫 Cancelling ongoing agent responses due to user interruption");
@@ -322,11 +278,8 @@ const MultiScenarioChat: React.FC<MultiScenarioChatProps> = ({
         // Reset agent response flag
         agentResponseInProgressRef.current = false;
         
-        // Clear inactivity timer
-        clearInactivityTimer();
-        
         console.log("✅ Ongoing response cancellation completed");
-    }, [safeSetTypingMessageIds, safeSetMessages, clearInactivityTimer]);
+    }, [safeSetTypingMessageIds, safeSetMessages]);
 
     // Function to stop agent responses when user is addressed (but keep existing messages)
     const stopAgentResponsesForUserTurn = useCallback(() => {
@@ -471,7 +424,6 @@ Bob just asked you to respond. As Alice (a fellow student who understands concep
                                 ));
                                 removeTypingMessageId(placeholderId);
                                 onNewMessage(aliceMessage);
-                                startInactivityTimer("alice");
                             } catch (error) {
                                 console.error("Error generating Alice redirect response:", error);
                                 removeTypingMessageId(placeholderId);
@@ -527,7 +479,6 @@ Bob just asked you to respond. As Charlie (a fellow student who's good at arithm
                                 ));
                                 removeTypingMessageId(placeholderId);
                                 onNewMessage(charlieMessage);
-                                startInactivityTimer("charlie");
                             } catch (error) {
                                 console.error("Error generating Charlie redirect response:", error);
                                 removeTypingMessageId(placeholderId);
@@ -543,36 +494,7 @@ Bob just asked you to respond. As Charlie (a fellow student who's good at arithm
             removeTypingMessageId(placeholderId);
             setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
         }
-    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId, currentQuestion, parseAddressedParticipant, createManagedTimeout, startInactivityTimer, getUniqueMessageId, aiService]);
-
-    const handleInactivity = useCallback(async () => {
-        if (isUnmountedRef.current || agentResponseInProgressRef.current) return;
-        
-        agentResponseInProgressRef.current = true;
-        safeSetIsQuestioningEnabled(false);
-        
-        try {
-            // Check if user was addressed but didn't respond
-            if (lastQuestioningAgent.current === "user") {
-                console.log("⏰ User didn't respond to Bob's question - Bob will ask someone else");
-                await generateBobRedirectResponse();
-            } else if (lastQuestioningAgent.current === "alice") {
-                await generateAliceInactivityResponse();
-            } else if (lastQuestioningAgent.current === "charlie") {
-                await generateCharlieInactivityResponse();
-            } else {
-                // Default to Bob for simplified question
-                await generateBobSimplifiedQuestion();
-            }
-            
-            startInactivityTimer();
-        } catch (error) {
-            console.error("Error in inactivity handling:", error);
-        } finally {
-            agentResponseInProgressRef.current = false;
-            safeSetIsQuestioningEnabled(true);
-        }
-    }, [agents, safeSetIsQuestioningEnabled, startInactivityTimer, messages, createManagedTimeout, generateBobRedirectResponse]);
+    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId, currentQuestion, parseAddressedParticipant, createManagedTimeout, getUniqueMessageId, aiService]);
 
     // Alice's initial message (responds to user's answer)
     const aliceInitialMessage = useCallback(
@@ -652,7 +574,7 @@ As Alice (a fellow student who understands concepts but makes arithmetic mistake
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, setIsQuestioningEnabled, startInactivityTimer, stopAgentResponsesForUserTurn]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, setIsQuestioningEnabled, stopAgentResponsesForUserTurn]
     );
 
     // Bob's follow-up feedback (provides feedback on agent response and asks new question)
@@ -898,9 +820,8 @@ As Charlie (a fellow student who is good at arithmetic but makes conceptual erro
                         }
                     }, 1500);
                 } else {
-                    // User was addressed - enable input and start inactivity timer
+                    // User was addressed - enable input
                     safeSetIsQuestioningEnabled(true);
-                    startInactivityTimer("user");
                 }
 
                 return bobMessage;
@@ -912,7 +833,7 @@ As Charlie (a fellow student who is good at arithmetic but makes conceptual erro
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, parseAddressedParticipant, createManagedTimeout, safeSetIsQuestioningEnabled, startInactivityTimer, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, getRandomParticipant]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, parseAddressedParticipant, createManagedTimeout, safeSetIsQuestioningEnabled, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, getRandomParticipant]
     );
 
     // Alice's generate message (responds to previous message)
@@ -1007,7 +928,7 @@ As Alice (a fellow student who understands concepts but makes arithmetic mistake
                 return null;
             }
         },
-        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, onNewMessage, safeSetIsQuestioningEnabled, startInactivityTimer, createManagedTimeout, stopAgentResponsesForUserTurn, messages, bobFollowUpFeedback]
+        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, onNewMessage, safeSetIsQuestioningEnabled, createManagedTimeout, stopAgentResponsesForUserTurn, messages, bobFollowUpFeedback]
     );
 
     // Charlie's initial message (responds to user's and Alice's answers)
@@ -1091,7 +1012,7 @@ As Charlie (a fellow student who's good at arithmetic but misunderstands concept
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, setIsQuestioningEnabled, startInactivityTimer, stopAgentResponsesForUserTurn]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, setIsQuestioningEnabled, stopAgentResponsesForUserTurn]
     );
 
     // Charlie's generate message (responds to previous message)
@@ -1211,7 +1132,7 @@ As Charlie (a fellow student who's good at arithmetic but misunderstands concept
                 return null;
             }
         },
-        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, onNewMessage, safeSetIsQuestioningEnabled, startInactivityTimer, createManagedTimeout, stopAgentResponsesForUserTurn, messages, bobFollowUpFeedback]
+        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, onNewMessage, safeSetIsQuestioningEnabled, createManagedTimeout, stopAgentResponsesForUserTurn, messages, bobFollowUpFeedback]
     );
 
     // Bob's initial message (provides feedback and prompts next participant)
@@ -1365,9 +1286,8 @@ Before concluding if any answer is right or wrong, work through the problem your
                     return bobMessage;
                 } else if (addressedParticipant === 'User') {
                     console.log("👤 User was addressed by Bob");
-                    // User was addressed - start inactivity timer and enable input
+                    // User was addressed - enable input
                     setIsQuestioningEnabled(true);
-                    startInactivityTimer("user"); // Track that user was addressed
                     return bobMessage;
                 }
 
@@ -1384,7 +1304,7 @@ Before concluding if any answer is right or wrong, work through the problem your
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, startInactivityTimer, stopAgentResponsesForUserTurn, getRandomParticipant]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, stopAgentResponsesForUserTurn, getRandomParticipant]
     );
 
     // Bob's generate message (responds to previous TWO messages for context)
@@ -1510,7 +1430,6 @@ The user has just sent a message. As Bob the tutor, first acknowledge what the u
                     }, 1500);
                 } else {
                     // Bob is addressing the user or general discussion
-                    startInactivityTimer("bob");
                 }
 
                 return bobMessage;
@@ -1521,7 +1440,7 @@ The user has just sent a message. As Bob the tutor, first acknowledge what the u
                 return null;
             }
         },
-        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, messages, startInactivityTimer, createManagedTimeout, parseAddressedParticipant, getRandomParticipant]
+        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, currentQuestion, onNewMessage, generateAliceMessage, generateCharlieMessage, messages, createManagedTimeout, parseAddressedParticipant, getRandomParticipant]
     );
 
     // Simplified sequential agent response function
@@ -1589,9 +1508,6 @@ The user has just sent a message. As Bob the tutor, first acknowledge what the u
     // Handle user messages - multi scenario logic
     const handleUserMessage = useCallback(
         async (userMessage: Message) => {
-            // Clear inactivity timer since user responded
-            clearInactivityTimer();
-            
             // Reset cancellation flag for new response sequence
             cancelCurrentResponseRef.current = false;
             
@@ -1616,7 +1532,7 @@ The user has just sent a message. As Bob the tutor, first acknowledge what the u
                 setIsQuestioningEnabled(true);
             }
         },
-        [generateBobMessage, setMessages, onNewMessage, setIsQuestioningEnabled, messages, clearInactivityTimer]
+        [generateBobMessage, setMessages, onNewMessage, setIsQuestioningEnabled, messages]
     );
 
     // Effect to trigger initial agent responses after user submission (one-time only)

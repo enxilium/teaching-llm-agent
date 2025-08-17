@@ -41,7 +41,6 @@ const SingleScenarioChat: React.FC<SingleScenarioChatProps> = ({
     const [showTooltip, setShowTooltip] = useState(false);
     const [tooltipMessage, setTooltipMessage] = useState("");
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const agentResponseInProgressRef = useRef(false); // Prevent multiple simultaneous responses
     const cancelCurrentResponseRef = useRef(false); // Signal to cancel ongoing agent responses
     const hasInitialResponseStarted = useRef(false); // Track if initial response sequence has started
@@ -56,12 +55,6 @@ const SingleScenarioChat: React.FC<SingleScenarioChatProps> = ({
         console.log("🧹 SingleScenarioChat component cleanup initiated");
         isUnmountedRef.current = true;
         agentResponseInProgressRef.current = false;
-        
-        // Clear inactivity timer
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
         
         // Clear all pending timeouts
         pendingTimeoutsRef.current.forEach(timeout => {
@@ -238,31 +231,6 @@ const SingleScenarioChat: React.FC<SingleScenarioChatProps> = ({
         }
     };
 
-    // Inactivity timer functions
-    const startInactivityTimer = useCallback(() => {
-        if (isUnmountedRef.current) return;
-        
-        console.log("⏰ Starting inactivity timer (60 seconds)");
-        
-        // Clear any existing timer
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-        }
-        
-        // Start 1-minute inactivity timer
-        inactivityTimeoutRef.current = createManagedTimeout(() => {
-            handleInactivity();
-        }, 60000); // 1 minute
-    }, [createManagedTimeout]);
-
-    const clearInactivityTimer = useCallback(() => {
-        if (inactivityTimeoutRef.current) {
-            console.log("⏹️ Clearing inactivity timer");
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
-    }, []);
-
     // Function to cancel ongoing agent responses when user interrupts
     const cancelOngoingResponses = useCallback(() => {
         console.log("🚫 Cancelling ongoing agent responses due to user interruption");
@@ -284,11 +252,8 @@ const SingleScenarioChat: React.FC<SingleScenarioChatProps> = ({
         // Reset agent response flag
         agentResponseInProgressRef.current = false;
         
-        // Clear inactivity timer
-        clearInactivityTimer();
-        
         console.log("✅ Ongoing response cancellation completed");
-    }, [safeSetTypingMessageIds, safeSetMessages, clearInactivityTimer]);
+    }, [safeSetTypingMessageIds, safeSetMessages]);
 
     // Function to stop agent responses when user is addressed (but keep existing messages)
     const stopAgentResponsesForUserTurn = useCallback(() => {
@@ -307,32 +272,6 @@ const SingleScenarioChat: React.FC<SingleScenarioChatProps> = ({
         
         console.log("✅ Agent response stopping completed - user can now respond");
     }, []);
-
-    const handleInactivity = useCallback(async () => {
-        if (isUnmountedRef.current || agentResponseInProgressRef.current) return;
-        
-        console.log("🕐 Inactivity timeout triggered - user hasn't responded");
-        agentResponseInProgressRef.current = true;
-        safeSetIsQuestioningEnabled(false);
-        
-        try {
-            // Single scenario: Bob asks a simpler question
-            const simplifiedQuestion = await generateBobSimplifiedQuestion();
-            
-            // After Bob asks simpler question, restart timer for user response
-            if (simplifiedQuestion && !isUnmountedRef.current) {
-                console.log("✅ Simplified question sent, restarting timer");
-                safeSetIsQuestioningEnabled(true);
-                createManagedTimeout(() => {
-                    startInactivityTimer();
-                }, 1000);
-            }
-        } catch (error) {
-            console.error("Error handling inactivity:", error);
-        } finally {
-            agentResponseInProgressRef.current = false;
-        }
-    }, [safeSetIsQuestioningEnabled, startInactivityTimer, createManagedTimeout]);
 
     // Bob's initial message (provides feedback and prompts user)
     const bobInitialMessage = useCallback(
@@ -449,7 +388,6 @@ CRITICAL: Verify all math before responding. If unsure about any calculation, st
                     console.log("Bob addressed user - starting inactivity timer");
                     createManagedTimeout(() => {
                         safeSetIsQuestioningEnabled(true);
-                        startInactivityTimer();
                     }, 1000); // Small delay to ensure message is fully rendered
                 } else {
                     // Bob didn't ask a question, just enable questioning
@@ -466,7 +404,7 @@ CRITICAL: Verify all math before responding. If unsure about any calculation, st
                 return null;
             }
         },
-        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, startInactivityTimer, stopAgentResponsesForUserTurn]
+        [agents, getUniqueMessageId, setMessages, addTypingMessageId, removeTypingMessageId, currentQuestion, onNewMessage, stopAgentResponsesForUserTurn]
     );
 
     // Bob's generate message (responds to user message)
@@ -570,7 +508,6 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
                     console.log("Bob addressed user - starting inactivity timer");
                     createManagedTimeout(() => {
                         safeSetIsQuestioningEnabled(true);
-                        startInactivityTimer();
                     }, 1000); // Small delay to ensure message is fully rendered
                 } else {
                     // Bob didn't ask a question, just enable questioning
@@ -585,7 +522,7 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
                 return null;
             }
         },
-        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, currentQuestion, onNewMessage, startInactivityTimer, createManagedTimeout]
+        [agents, getUniqueMessageId, safeSetMessages, safeAddTypingMessageId, safeRemoveTypingMessageId, currentQuestion, onNewMessage, createManagedTimeout]
     );
 
     // Simplified sequential agent response function for single scenario
@@ -651,7 +588,6 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
     const handleUserMessage = useCallback(
         async (userMessage: Message) => {
             // Clear inactivity timer since user responded
-            clearInactivityTimer();
             
             // Reset cancellation flag for new response sequence
             cancelCurrentResponseRef.current = false;
@@ -712,7 +648,7 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
                 agentResponseInProgressRef.current = false;
             }
         },
-        [generateBobMessage, setMessages, onNewMessage, setIsQuestioningEnabled, typingMessageIds, clearInactivityTimer, isUserRespondingToQuestion]
+        [generateBobMessage, setMessages, onNewMessage, setIsQuestioningEnabled, typingMessageIds, isUserRespondingToQuestion]
     );
 
     // Effect to trigger initial agent responses after user submission (one-time only)

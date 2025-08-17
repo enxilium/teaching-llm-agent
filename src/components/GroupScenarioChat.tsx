@@ -41,7 +41,6 @@ const GroupScenarioChat: React.FC<GroupScenarioChatProps> = ({
     const [showTooltip, setShowTooltip] = useState(false);
     const [tooltipMessage, setTooltipMessage] = useState("");
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const agentResponseInProgressRef = useRef(false); // Prevent multiple simultaneous responses
     const cancelCurrentResponseRef = useRef(false); // Signal to cancel ongoing agent responses
     const hasInitialResponseStarted = useRef(false); // Track if initial response sequence has started
@@ -56,11 +55,6 @@ const GroupScenarioChat: React.FC<GroupScenarioChatProps> = ({
         console.log("🧹 GroupScenarioChat component cleanup initiated");
         isUnmountedRef.current = true;
         agentResponseInProgressRef.current = false;
-        
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
         
         // Clear all pending timeouts
         pendingTimeoutsRef.current.forEach(timeout => {
@@ -206,12 +200,6 @@ const GroupScenarioChat: React.FC<GroupScenarioChatProps> = ({
         // Signal all ongoing agent responses to cancel
         cancelCurrentResponseRef.current = true;
         agentResponseInProgressRef.current = false;
-        
-        // Clear inactivity timer
-        if (inactivityTimeoutRef.current) {
-            clearTimeout(inactivityTimeoutRef.current);
-            inactivityTimeoutRef.current = null;
-        }
         
         // Reset cancellation flag after a brief delay
         createManagedTimeout(() => {
@@ -363,25 +351,8 @@ IMPORTANT:
                         const addressedParticipant = parseAddressedParticipant(finalMessage.text);
                         
                         if (addressedParticipant === 'User') {
-                            // Alice addressed user, enable input and start inactivity timer
+                            // Alice addressed user, enable input
                             safeSetIsQuestioningEnabled(true);
-                            // Clear any existing timer
-                            if (inactivityTimeoutRef.current) {
-                                clearTimeout(inactivityTimeoutRef.current);
-                            }
-                            inactivityTimeoutRef.current = createManagedTimeout(() => {
-                                if (!isUnmountedRef.current && !agentResponseInProgressRef.current) {
-                                    console.log("⏰ User inactivity after Alice - Charlie covering");
-                                    const coverMessage: Message = {
-                                        id: getUniqueMessageId(),
-                                        sender: "ai",
-                                        agentId: "concept", 
-                                        text: "Hey! I know this one!",
-                                        timestamp: new Date().toISOString(),
-                                    };
-                                    generateCharlieResponse(coverMessage, false);
-                                }
-                            }, 30000);
                         } else if (addressedParticipant === 'Charlie') {
                             // Alice addressed Charlie, trigger Charlie's response
                             agentResponseInProgressRef.current = true; // Set to true for next agent response
@@ -391,23 +362,6 @@ IMPORTANT:
                         } else {
                             // Default to enabling user input
                             safeSetIsQuestioningEnabled(true);
-                            // Clear any existing timer
-                            if (inactivityTimeoutRef.current) {
-                                clearTimeout(inactivityTimeoutRef.current);
-                            }
-                            inactivityTimeoutRef.current = createManagedTimeout(() => {
-                                if (!isUnmountedRef.current && !agentResponseInProgressRef.current) {
-                                    console.log("⏰ User inactivity after Alice - Charlie covering");
-                                    const coverMessage: Message = {
-                                        id: getUniqueMessageId(),
-                                        sender: "ai",
-                                        agentId: "concept",
-                                        text: "Ooh, I've got this!",
-                                        timestamp: new Date().toISOString(),
-                                    };
-                                    generateCharlieResponse(coverMessage, false);
-                                }
-                            }, 30000);
                         }
                     }
                 }
@@ -568,25 +522,8 @@ IMPORTANT:
                         const addressedParticipant = parseAddressedParticipant(finalMessage.text);
                         
                         if (addressedParticipant === 'User') {
-                            // Charlie addressed user, enable input and start inactivity timer
+                            // Charlie addressed user, enable input
                             safeSetIsQuestioningEnabled(true);
-                            // Clear any existing timer
-                            if (inactivityTimeoutRef.current) {
-                                clearTimeout(inactivityTimeoutRef.current);
-                            }
-                            inactivityTimeoutRef.current = createManagedTimeout(() => {
-                                if (!isUnmountedRef.current && !agentResponseInProgressRef.current) {
-                                    console.log("⏰ User inactivity after Charlie - Alice covering");
-                                    const coverMessage: Message = {
-                                        id: getUniqueMessageId(),
-                                        sender: "ai",
-                                        agentId: "arithmetic",
-                                        text: "Oh! I know this one!",
-                                        timestamp: new Date().toISOString(),
-                                    };
-                                    generateAliceResponse(coverMessage, false);
-                                }
-                            }, 30000);
                         } else if (addressedParticipant === 'Alice') {
                             // Charlie addressed Alice, trigger Alice's response
                             agentResponseInProgressRef.current = true; // Set to true for next agent response
@@ -596,23 +533,6 @@ IMPORTANT:
                         } else {
                             // Default to enabling user input
                             safeSetIsQuestioningEnabled(true);
-                            // Clear any existing timer
-                            if (inactivityTimeoutRef.current) {
-                                clearTimeout(inactivityTimeoutRef.current);
-                            }
-                            inactivityTimeoutRef.current = createManagedTimeout(() => {
-                                if (!isUnmountedRef.current && !agentResponseInProgressRef.current) {
-                                    console.log("⏰ User inactivity after Charlie - Alice covering");
-                                    const coverMessage: Message = {
-                                        id: getUniqueMessageId(),
-                                        sender: "ai",
-                                        agentId: "arithmetic",
-                                        text: "Wait, I think I can get this!",
-                                        timestamp: new Date().toISOString(),
-                                    };
-                                    generateAliceResponse(coverMessage, false);
-                                }
-                            }, 30000);
                         }
                     }
                 }
