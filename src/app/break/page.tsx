@@ -49,15 +49,13 @@ export default function BreakPage() {
                                 the next section.
                             </p>
                         </div>
-                        {process.env.NODE_ENV === "development" && (
-                            <button
-                                onClick={handleGameComplete}
-                                disabled={isTransitioning}
-                                className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-                            >
-                                Skip Break (Dev)
-                            </button>
-                        )}
+                        <button
+                            onClick={handleGameComplete}
+                            disabled={isTransitioning}
+                            className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                        >
+                            Skip Break
+                        </button>
                     </div>
                 </div>
 

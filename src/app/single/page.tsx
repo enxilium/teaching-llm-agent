@@ -39,7 +39,7 @@ export default function SinglePage() {
     const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
     const [sessionStartTime] = useState<Date>(new Date());
     const [canSubmit, setCanSubmit] = useState(false);
-    const [canSkip, setCanSkip] = useState(process.env.NODE_ENV === "development"); // Enable immediately in development
+    const [canSkip, setCanSkip] = useState(true); // Enable immediately for development branch
     const [agents, setAgents] = useState<Agent[]>([]);
     const [initialMessages, setInitialMessages] = useState<Message[]>([]);
     const [allMessages, setAllMessages] = useState<Message[]>([]);
@@ -131,7 +131,7 @@ export default function SinglePage() {
                 const newTime = prev - 1;
                 
                 // Enable skip button after 2 minutes (when 3 minutes remain) or immediately in development
-                if ((newTime <= 180 && !canSkip) || (process.env.NODE_ENV === "development" && !canSkip)) {
+                if (newTime <= 180 && !canSkip) {
                     setCanSkip(true);
                 }
                 
@@ -175,7 +175,7 @@ export default function SinglePage() {
         setAllMessages([userFinalAnswer]); // Track in allMessages too
         setHasSubmittedAnswer(true);
         setTimeLeft(300); // Reset timer to 5 minutes when scenario starts
-        setCanSkip(process.env.NODE_ENV === "development"); // Reset skip button, enable immediately in development
+        setCanSkip(true); // Reset skip button, enable immediately for development branch
     };
 
     const handleNewMessage = useCallback((message: Message) => {
