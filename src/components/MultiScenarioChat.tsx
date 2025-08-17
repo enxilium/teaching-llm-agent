@@ -1270,7 +1270,6 @@ Before concluding if any answer is right or wrong, work through the problem your
                         }
                     }, 1500);
                     setIsQuestioningEnabled(false); // Disable user input while Alice responds
-                    // No inactivity timer needed - Alice will respond quickly
                     return bobMessage;
                 } else if (addressedParticipant === 'Charlie') {
                     console.log("🔥 Charlie should respond to Bob's question");
@@ -1282,7 +1281,6 @@ Before concluding if any answer is right or wrong, work through the problem your
                         }
                     }, 1500);
                     setIsQuestioningEnabled(false); // Disable user input while Charlie responds
-                    // No inactivity timer needed - Charlie will respond quickly
                     return bobMessage;
                 } else if (addressedParticipant === 'User') {
                     console.log("👤 User was addressed by Bob");
@@ -1294,7 +1292,6 @@ Before concluding if any answer is right or wrong, work through the problem your
                 // If no specific participant was addressed, treat as general discussion
                 console.log("💬 Bob made a general comment - no specific participant addressed");
                 setIsQuestioningEnabled(true);
-                // Don't start inactivity timer for general comments
 
                 return bobMessage;
             } catch (error) {
@@ -1585,163 +1582,6 @@ The user has just sent a message. As Bob the tutor, first acknowledge what the u
             avatar: agent?.avatar || "tutor_avatar.svg",
         };
     };
-
-    // Inactivity response functions
-    const generateAliceInactivityResponse = useCallback(async () => {
-        const aliceAgent = agents.find(agent => agent.id === "arithmetic");
-        if (!aliceAgent) return;
-
-        const placeholderId = getUniqueMessageId();
-        const placeholder: Message = {
-            id: placeholderId,
-            sender: "ai",
-            agentId: aliceAgent.id,
-            text: "...",
-            timestamp: new Date().toISOString(),
-        };
-
-        setMessages(prev => [...prev, placeholder]);
-        addTypingMessageId(placeholderId);
-
-        try {
-            const alicePrompt = `${aliceAgent.systemPrompt}
-
-The user has been quiet for a while. As Alice (a fellow student who understands concepts but makes arithmetic mistakes), share what you're thinking about the current problem or ask what approach they're trying. Show your own approach with the right concepts but wrong calculations if relevant. Don't encourage - just act like a peer student. Keep response to 1 sentence only. Address them as @User and remember to use single $ for math like $x^2 + 3x + 2$.`;
-
-            const response = await aiService.generateResponse([
-                { 
-                    id: 1,
-                    sender: "user", 
-                    text: alicePrompt, 
-                    timestamp: new Date().toISOString() 
-                }
-            ]);
-
-            const aliceMessage: Message = {
-                id: placeholderId,
-                sender: "ai",
-                agentId: aliceAgent.id,
-                text: response,
-                timestamp: new Date().toISOString(),
-            };
-
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId ? aliceMessage : msg
-            ));
-            removeTypingMessageId(placeholderId);
-            onNewMessage(aliceMessage);
-        } catch (error) {
-            console.error("Error generating Alice inactivity response:", error);
-            removeTypingMessageId(placeholderId);
-            setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
-        }
-    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId]);
-
-    const generateCharlieInactivityResponse = useCallback(async () => {
-        const charlieAgent = agents.find(agent => agent.id === "concept");
-        if (!charlieAgent) return;
-
-        const placeholderId = getUniqueMessageId();
-        const placeholder: Message = {
-            id: placeholderId,
-            sender: "ai",
-            agentId: charlieAgent.id,
-            text: "...",
-            timestamp: new Date().toISOString(),
-        };
-
-        setMessages(prev => [...prev, placeholder]);
-        addTypingMessageId(placeholderId);
-
-        try {
-            const charliePrompt = `${charlieAgent.systemPrompt}
-
-The user has been quiet for a while. As Charlie (a fellow student who's good at arithmetic but misunderstands concepts), share what you're thinking about the current problem or ask what approach they're trying. Show your own approach with correct arithmetic but wrong concepts if relevant. Don't encourage - just act like a peer student. Keep response to 1 sentence only. Address them as @User and remember to use single $ for math like $x^2 + 3x + 2$.`;
-
-            const response = await aiService.generateResponse([
-                { 
-                    id: 1,
-                    sender: "user", 
-                    text: charliePrompt, 
-                    timestamp: new Date().toISOString() 
-                }
-            ]);
-
-            const charlieMessage: Message = {
-                id: placeholderId,
-                sender: "ai",
-                agentId: charlieAgent.id,
-                text: response,
-                timestamp: new Date().toISOString(),
-            };
-
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId ? charlieMessage : msg
-            ));
-            removeTypingMessageId(placeholderId);
-            onNewMessage(charlieMessage);
-        } catch (error) {
-            console.error("Error generating Charlie inactivity response:", error);
-            removeTypingMessageId(placeholderId);
-            setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
-        }
-    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId]);
-
-    const generateBobSimplifiedQuestion = useCallback(async () => {
-        const bobAgent = agents.find(agent => agent.id === "bob");
-        if (!bobAgent) return;
-
-        const placeholderId = getUniqueMessageId();
-        const placeholder: Message = {
-            id: placeholderId,
-            sender: "ai",
-            agentId: bobAgent.id,
-            text: "...",
-            timestamp: new Date().toISOString(),
-        };
-
-        setMessages(prev => [...prev, placeholder]);
-        addTypingMessageId(placeholderId);
-
-        try {
-            // Randomly select who Bob should address
-            const nextParticipant = getRandomParticipant();
-
-            const bobPrompt = `${bobAgent.systemPrompt}
-
-The group discussion seems to need a boost. Alice tends to make arithmetic mistakes but understands concepts. Charlie makes conceptual errors but is good at arithmetic. Ask a simple, specific question about the current problem to get the discussion going again. Address your question to @${nextParticipant} to engage them in the collaborative learning process. Don't use markdown formatting (no **bold** or *italics*) - use plain text. LaTeX math formatting with single $ is fine. Remember to use single $ for math like $x^2 + 3x + 2$.`;
-
-            const response = await aiService.generateResponse([
-                { 
-                    id: 1,
-                    sender: "user", 
-                    text: bobPrompt, 
-                    timestamp: new Date().toISOString() 
-                }
-            ]);
-
-            // Ensure Bob's response has proper @mention
-            const validatedResponse = ensureProperMention(response, nextParticipant);
-
-            const bobMessage: Message = {
-                id: placeholderId,
-                sender: "ai",
-                agentId: bobAgent.id,
-                text: validatedResponse,
-                timestamp: new Date().toISOString(),
-            };
-
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId ? bobMessage : msg
-            ));
-            removeTypingMessageId(placeholderId);
-            onNewMessage(bobMessage);
-        } catch (error) {
-            console.error("Error generating Bob simplified question:", error);
-            removeTypingMessageId(placeholderId);
-            setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
-        }
-    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId, getRandomParticipant]);
 
     return (
         <div className="chat-container flex-1 flex flex-col h-full overflow-hidden">
