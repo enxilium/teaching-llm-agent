@@ -380,21 +380,13 @@ CRITICAL: Verify all math before responding. If unsure about any calculation, st
                 removeTypingMessageId(placeholderId);
                 onNewMessage(finalMessage);
 
-                // In single scenario, stop agent responses and start inactivity timer since user should respond
+                // In single scenario, stop agent responses since user should respond
                 stopAgentResponsesForUserTurn();
                 
-                // Only start inactivity timer if Bob's message addresses the user (expects a response)
-                if (finalMessage.text.includes('@User')) {
-                    console.log("Bob addressed user - starting inactivity timer");
-                    createManagedTimeout(() => {
-                        safeSetIsQuestioningEnabled(true);
-                    }, 1000); // Small delay to ensure message is fully rendered
-                } else {
-                    // Bob didn't ask a question, just enable questioning
-                    createManagedTimeout(() => {
-                        safeSetIsQuestioningEnabled(true);
-                    }, 1000);
-                }
+                // Enable questioning after a small delay
+                createManagedTimeout(() => {
+                    safeSetIsQuestioningEnabled(true);
+                }, 1000); // Small delay to ensure message is fully rendered
 
                 return finalMessage;
             } catch (error) {
@@ -500,21 +492,13 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
                 safeRemoveTypingMessageId(placeholderId);
                 onNewMessage(finalMessage);
 
-                // In single scenario, always stop agent responses and start inactivity timer since user should respond
+                // In single scenario, stop agent responses since user should respond
                 stopAgentResponsesForUserTurn();
                 
-                // Only start inactivity timer if Bob's message addresses the user (expects a response)
-                if (finalMessage.text.includes('@User')) {
-                    console.log("Bob addressed user - starting inactivity timer");
-                    createManagedTimeout(() => {
-                        safeSetIsQuestioningEnabled(true);
-                    }, 1000); // Small delay to ensure message is fully rendered
-                } else {
-                    // Bob didn't ask a question, just enable questioning
-                    createManagedTimeout(() => {
-                        safeSetIsQuestioningEnabled(true);
-                    }, 1000);
-                }
+                // Enable questioning after a small delay
+                createManagedTimeout(() => {
+                    safeSetIsQuestioningEnabled(true);
+                }, 1000); // Small delay to ensure message is fully rendered
 
                 return finalMessage;
             } catch (error) {
@@ -587,8 +571,6 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
     // Handle user messages
     const handleUserMessage = useCallback(
         async (userMessage: Message) => {
-            // Clear inactivity timer since user responded
-            
             // Reset cancellation flag for new response sequence
             cancelCurrentResponseRef.current = false;
             
@@ -709,89 +691,6 @@ CRITICAL: Double-check any math before responding. If uncertain, just state the 
             avatar: agent?.avatar || "tutor_avatar.svg",
         };
     };
-
-    const generateBobSimplifiedQuestion = useCallback(async () => {
-        const bobAgent = agents.find(agent => agent.id === "bob");
-        if (!bobAgent) return;
-
-        const placeholderId = getUniqueMessageId();
-        const placeholder: Message = {
-            id: placeholderId,
-            sender: "ai",
-            agentId: bobAgent.id,
-            text: "...",
-            timestamp: new Date().toISOString(),
-        };
-
-        setMessages(prev => [...prev, placeholder]);
-        addTypingMessageId(placeholderId);
-
-        try {
-            const currentTime = new Date().toISOString();
-            
-            // Get the most recent Bob message (excluding the current placeholder)
-            const previousBobMessages = messages.filter(msg => 
-                msg.sender === "ai" && 
-                msg.agentId === "bob" && 
-                msg.text !== "..." &&
-                msg.id !== placeholderId
-            );
-            const lastBobMessage = previousBobMessages[previousBobMessages.length - 1];
-            const lastMessageText = lastBobMessage?.text || "";
-            
-            console.log("Inactivity timeout triggered - Bob's previous message:", lastMessageText.substring(0, 100));
-            
-            const inactivityPrompt = `The user has been silent after your question. Ask a simpler version to help them get unstuck.
-
-YOUR PREVIOUS MESSAGE: "${lastMessageText}"
-
-TASK: 
-- Briefly acknowledge they might need a simpler approach (1 sentence)
-- Ask ONE specific, easier question that builds toward the answer
-- Keep it under 50 words total
-
-REQUIREMENTS:
-- Be concise and encouraging
-- Focus on one small step or concept
-- No complex explanations
-- Be mathematically accurate
-
-Example: "Let me try a simpler approach - what's the first step you'd take here?" or "No worries! Can you tell me what operation this problem is asking for?"`;
-            
-            const enhancedSystemPrompt = bobAgent.systemPrompt + "\n\n" + inactivityPrompt;
-            const conversationHistory = messages.slice(-3);
-
-            const aiResponse = await aiService.generateResponse(
-                conversationHistory,
-                {
-                    systemPrompt: enhancedSystemPrompt,
-                    model: bobAgent.model,
-                    temperature: 0.3 // Lower temperature for more precise, consistent responses
-                }
-            );
-
-            const finalMessage: Message = {
-                id: placeholderId,
-                sender: "ai",
-                agentId: bobAgent.id,
-                text: aiResponse,
-                timestamp: currentTime,
-            };
-
-            setMessages(prev => prev.map(msg => 
-                msg.id === placeholderId ? finalMessage : msg
-            ));
-            
-            removeTypingMessageId(placeholderId);
-            onNewMessage(finalMessage);
-            
-            return finalMessage;
-        } catch (error) {
-            console.error("Error generating Bob simplified question:", error);
-            removeTypingMessageId(placeholderId);
-            return null;
-        }
-    }, [agents, messages, setMessages, onNewMessage, addTypingMessageId, removeTypingMessageId]);
 
     return (
         <div className="chat-container flex-1 flex flex-col h-full overflow-hidden">
