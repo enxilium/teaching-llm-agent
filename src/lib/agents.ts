@@ -4,7 +4,7 @@ export interface Agent {
     alias: string;
     avatar: string;
     systemPrompt: string;
-    model?: string; // e.g., 'gpt-4o-2024-08-06' for smarter models
+    model?: string; 
 }
 
 /**

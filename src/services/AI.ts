@@ -1,17 +1,17 @@
 import { Message } from "@/utils/types";
 
-// Define AI model with GPT-4o configuration
+// Define AI model with GPT-5 configuration
 export const AI_MODELS = {
-    GPT4O: {
-        id: "gpt-4o-2024-08-06",
-        name: "GPT-4o",
+    GPT5: {
+        id: "gpt-5",
+        name: "GPT5",
         provider: "openai",
         maxTokens: 4096,
         temperature: 0.3, // Set temperature to 0.3 for more diverse responses while staying focused
     },
 };
 
-export const DEFAULT_MODEL = AI_MODELS.GPT4O;
+export const DEFAULT_MODEL = AI_MODELS.GPT5;
 
 // Interface for AI service options
 interface AIServiceOptions {
@@ -21,15 +21,14 @@ interface AIServiceOptions {
 }
 
 /**
- * AI service for generating responses from GPT-4o
+ * AI service for generating responses from GPT-5
  */
 export const aiService = {
     generateResponse: async (
         messages: Message[],
         options: AIServiceOptions = {}
     ): Promise<string> => {
-        // Always use the GPT-4o model
-        const modelId = options.model || AI_MODELS.GPT4O.id;
+        const modelId = options.model || AI_MODELS.GPT5.id;
 
         // Format messages for OpenAI API
         const formattedMessages = [];

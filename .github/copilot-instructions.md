@@ -45,7 +45,7 @@ All lesson pages follow identical structure but load different agent configurati
 
 ### API Route Structure
 - `/api/submit`: Main data submission endpoint with comprehensive error handling and validation
-- `/api/openai`: GPT-4o integration for agent responses (temp: 0.3, max_tokens: 1000)
+- `/api/openai`: GPT-5 integration for agent responses (temp: 0.3, max_tokens: 1000)
 - `/api/firebase-submit`: Firebase Admin SDK integration with automatic data sanitization
 - `/api/tests`: Test question delivery and answer validation
 - `/api/submit-survey`: Survey data collection with validation

@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Set default model if not provided - always use gpt-4o-2024-08-06
-        const modelId = model || "gpt-4o-2024-08-06";
+        // Set default model if not provided - always use gpt-5
+        const modelId = "gpt-5";
 
         // Call OpenAI API with appropriate temperature
         const completion = await openai.chat.completions.create({
@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
             max_tokens: 4096,
             presence_penalty: 0.6, // Encourage different responses
             frequency_penalty: 0.3, // Discourage repetition
+            verbosity: "low",
         });
 
         // Extract the response content
