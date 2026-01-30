@@ -13,10 +13,10 @@ interface CurrentQuestion {
     answer: string;
 }
 
-export default function SoloPage() {
+export default function TestPage() {
     const {
-        completeLesson,
-        lessonQuestionIndex,
+        completeTest,
+        testQuestionIndex,
         selectedCategoryIndices,
         categoryVariations,
         saveQuestionSubmission,
@@ -52,8 +52,8 @@ export default function SoloPage() {
             const submission: QuestionSubmission = {
                 questionId: currentQuestion.id,
                 categoryId: currentQuestion.categoryId,
-                phase: "lesson",
-                questionIndex: lessonQuestionIndex,
+                phase: "test",
+                questionIndex: testQuestionIndex,
                 questionText: currentQuestion.question,
                 correctAnswer: currentQuestion.answer,
                 userAnswer: userAnswer,
@@ -69,28 +69,28 @@ export default function SoloPage() {
             };
 
             saveQuestionSubmission(submission);
-            completeLesson();
+            completeTest();
         },
         [
             sessionStartTime,
             currentQuestion,
             scratchboardContent,
             lessonType,
-            lessonQuestionIndex,
+            testQuestionIndex,
             finalAnswer,
             saveQuestionSubmission,
-            completeLesson,
+            completeTest,
         ]
     );
 
     // Track the question index to detect changes and reset state
-    const previousQuestionIndexRef = useRef(lessonQuestionIndex);
+    const previousQuestionIndexRef = useRef(testQuestionIndex);
     
-    // Reset all component state when lessonQuestionIndex changes (moving to next question)
+    // Reset all component state when testQuestionIndex changes (moving to next question)
     useEffect(() => {
-        if (previousQuestionIndexRef.current !== lessonQuestionIndex) {
-            console.log(`📝 Question index changed from ${previousQuestionIndexRef.current} to ${lessonQuestionIndex}, resetting state`);
-            previousQuestionIndexRef.current = lessonQuestionIndex;
+        if (previousQuestionIndexRef.current !== testQuestionIndex) {
+            console.log(`📝 Test question index changed from ${previousQuestionIndexRef.current} to ${testQuestionIndex}, resetting state`);
+            previousQuestionIndexRef.current = testQuestionIndex;
             
             // Reset all state for the new question
             setScratchboardContent("");
@@ -106,16 +106,16 @@ export default function SoloPage() {
             setSessionStartTime(new Date());
             setQuestionLoadTime(new Date().toISOString());
         }
-    }, [lessonQuestionIndex]);
+    }, [testQuestionIndex]);
 
-    // Load question
+    // Load question (uses test variation - opposite of lesson variation)
     useEffect(() => {
         const fetchAndSelectQuestion = async () => {
             setIsLoading(true);
             setError(null);
             
             try {
-                console.log("Loading question...", { lessonQuestionIndex, selectedCategoryIndices, categoryVariations });
+                console.log("Loading test question...", { testQuestionIndex, selectedCategoryIndices, categoryVariations });
                 
                 const response = await fetch("/questions.json");
                 if (!response.ok) throw new Error("Failed to fetch questions");
@@ -127,7 +127,7 @@ export default function SoloPage() {
                     return;
                 }
                 
-                const safeIndex = Math.min(Math.max(0, lessonQuestionIndex), 1);
+                const safeIndex = Math.min(Math.max(0, testQuestionIndex), 1);
                 const categoryIndex = selectedCategoryIndices[safeIndex];
                 const category = data.categories[categoryIndex];
                 
@@ -135,14 +135,15 @@ export default function SoloPage() {
                     throw new Error(`Category not found at index ${categoryIndex}`);
                 }
                 
-                const variationIdx = categoryVariations?.find(cv => cv.categoryIndex === categoryIndex)?.lessonVariation ?? 0;
+                // Use testVariation (opposite of lessonVariation)
+                const variationIdx = categoryVariations?.find(cv => cv.categoryIndex === categoryIndex)?.testVariation ?? 1;
                 const questionData = category.variations?.[variationIdx];
                 
                 if (!questionData) {
                     throw new Error(`Question variation not found`);
                 }
                 
-                console.log("Question loaded:", questionData.question.substring(0, 50) + "...");
+                console.log("Test question loaded:", questionData.question.substring(0, 50) + "...");
                 
                 setCurrentQuestion({
                     id: categoryIndex,
@@ -159,7 +160,7 @@ export default function SoloPage() {
         };
 
         fetchAndSelectQuestion();
-    }, [lessonQuestionIndex, selectedCategoryIndices, categoryVariations]);
+    }, [testQuestionIndex, selectedCategoryIndices, categoryVariations]);
 
     // Timer for work phase
     useEffect(() => {
@@ -217,7 +218,7 @@ export default function SoloPage() {
     if (isLoading) {
         return (
             <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] flex items-center justify-center">
-                <div className="text-white text-xl">Loading question...</div>
+                <div className="text-white text-xl">Loading test question...</div>
             </div>
         );
     }
@@ -241,6 +242,12 @@ export default function SoloPage() {
     return (
         <div className="h-screen bg-gradient-to-b from-[#2D0278] to-[#0A001D] p-4 flex flex-col overflow-hidden fixed inset-0">
             <div className="w-full max-w-4xl mx-auto flex flex-col h-full overflow-hidden">
+                <div className="mb-4">
+                    <h2 className="text-2xl text-white font-bold text-center mb-2">
+                        Test Question {testQuestionIndex + 1} of 2
+                    </h2>
+                </div>
+
                 <ProblemDisplay
                     question={currentQuestion.question}
                     timeLeft={0}

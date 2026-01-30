@@ -7,6 +7,20 @@ import { useFlow } from '@/context/FlowContext';
 export default function IntroPage() {
     const { completeIntro, lessonType } = useFlow();
 
+    // Log the scenario type for debugging
+    useEffect(() => {
+        console.log("📋 SCENARIO ASSIGNED:", lessonType);
+        console.log("📋 Scenario details:", {
+            lessonType,
+            hasAgents: lessonType !== 'solo' && lessonType !== null,
+            scenarioName: lessonType === 'multi' ? 'Tutor + Peers' 
+                        : lessonType === 'single' ? 'Tutor Only'
+                        : lessonType === 'group' ? 'Peers Only'
+                        : lessonType === 'solo' ? 'Solo (No Agents)'
+                        : 'Loading...'
+        });
+    }, [lessonType]);
+
     // Agent descriptions based on lessonType
     const getAgentDescriptions = () => {
         switch (lessonType) {
@@ -72,7 +86,18 @@ export default function IntroPage() {
     };
     
     // Check if this scenario involves chat (any scenario except 'solo')
-    const hasChat = lessonType !== 'solo';
+    const hasChat = lessonType !== 'solo' && lessonType !== null;
+
+    // Get a friendly name for the scenario
+    const getScenarioName = () => {
+        switch (lessonType) {
+            case 'multi': return 'Tutor + Peers';
+            case 'single': return 'Tutor Only';
+            case 'group': return 'Peer Discussion';
+            case 'solo': return 'Independent Study';
+            default: return 'Loading...';
+        }
+    };
 
     const agents = getAgentDescriptions();
     
@@ -81,28 +106,40 @@ export default function IntroPage() {
             <div className="max-w-3xl mx-auto text-white">
                 <h1 className="text-3xl font-bold text-white text-center mb-6">Introduction to Your Learning Experience</h1>
                 
+                {/* Scenario Assignment Display */}
+                <div className="bg-blue-900 bg-opacity-50 p-4 rounded-lg border border-blue-400 mb-6">
+                    <div className="flex items-center justify-between">
+                        <span className="text-lg">Your assigned learning scenario:</span>
+                        <span className="text-xl font-bold text-blue-300">{getScenarioName()}</span>
+                    </div>
+                </div>
+                
                 <div className="bg-purple-900 bg-opacity-50 p-6 rounded-lg border border-purple-500 mb-8">
                     <h2 className="text-2xl font-bold mb-4">Study Overview</h2>
                     <p className="mb-4">
-                        In this study, you will solve multiple-choice math problems about exponents. The problems are similar to those commonly found on standardized tests.
+                        In this study, you will solve math problems involving exponents, roots, and algebraic operations. The problems are similar to those found on standardized tests.
                     </p>
                     <p className="mb-4">
-                        The study has the following stages:
+                        The study consists of:
                     </p>
                     <ol className="list-decimal pl-6 mb-4 space-y-2">
-                        <li>Complete a survey to share your background with mathematics.</li>
-                        <li>Answer a few practice problems to assess your initial understanding.</li>
-                        <li>{getScenarioDescription()}</li>
-                        <li>Take a short break with a tetris game.</li>
-                        <li>Answer questions similar to the practice problems to measure your progress.</li>
-                        <li>Complete a final set of questions that test your understanding.</li>
-                        <li>Share your experience and feedback.</li>
+                        <li><strong>Pre-Survey:</strong> A quick question about your math background.</li>
+                        <li><strong>Practice Section:</strong> 2 math problems where you&apos;ll work through and submit your answers. {hasChat ? "After submitting each answer, you can discuss it with your learning partner(s)." : ""}</li>
+                        <li><strong>Break:</strong> A short tetris break to refresh your mind.</li>
+                        <li><strong>Test Section:</strong> 2 similar problems to measure what you&apos;ve learned (no chat available).</li>
+                        <li><strong>Post-Survey:</strong> Share your experience and feedback.</li>
                     </ol>
+                    
+                    {hasChat && (
+                        <div className="mt-4 p-3 bg-purple-800 bg-opacity-50 rounded border border-purple-400">
+                            <p className="text-sm"><strong>About the chat:</strong> {getScenarioDescription()}</p>
+                        </div>
+                    )}
                 </div>
 
                 {agents.length > 0 && (
                     <div className="bg-white bg-opacity-10 p-6 rounded-lg mb-8">
-                        <h2 className="text-2xl font-bold mb-4">Meet Your {lessonType === 'single' ? 'Tutor' : 'Study Partners'}</h2>
+                        <h2 className="text-2xl font-bold mb-4">Meet Your {lessonType === 'single' ? 'Tutor' : lessonType === 'multi' ? 'Tutor and Study Partners' : 'Study Partners'}</h2>
                         <div className="space-y-6">
                             {agents.map((agent, index) => (
                                 <div key={index} className="flex items-start space-x-4 p-3 rounded-lg bg-white bg-opacity-10">
@@ -126,9 +163,22 @@ export default function IntroPage() {
                         {/* Note about @User reference in chat logs */}
                         {hasChat && (
                             <div className="mt-4 p-3 bg-blue-900 bg-opacity-40 rounded-lg border border-blue-500">
-                                <p><strong>Note:</strong> In the chat, you may be referred to as "@User" in the conversation.</p>
+                                <p><strong>Note:</strong> In the chat, you may be referred to as &quot;@User&quot; in the conversation.</p>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {/* Solo mode explanation */}
+                {lessonType === 'solo' && (
+                    <div className="bg-white bg-opacity-10 p-6 rounded-lg mb-8">
+                        <h2 className="text-2xl font-bold mb-4">Independent Study Mode</h2>
+                        <p>
+                            In this session, you will work through the practice problems independently. 
+                            After submitting your answers, you will receive brief feedback before moving 
+                            on to the next problem. Focus on your own problem-solving approach and take 
+                            notes in the scratchpad as needed.
+                        </p>
                     </div>
                 )}
                 

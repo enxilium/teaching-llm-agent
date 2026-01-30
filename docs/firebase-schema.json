@@ -1,0 +1,267 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExperimentSubmission",
+  "description": "Complete schema for experiment data submitted to Firebase",
+  "type": "object",
+  "required": [
+    "user_id",
+    "condition",
+    "pre_survey",
+    "practice_section",
+    "test_section",
+    "post_survey",
+    "submitted_at"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "description": "Unique identifier for the participant"
+    },
+    "condition": {
+      "type": "string",
+      "enum": ["multi", "single", "peers", "solo"],
+      "description": "Experimental condition: multi (tutor+peers), single (tutor only), peers (peers only, formerly 'group'), solo (no agents)"
+    },
+    "pre_survey": {
+      "type": "object",
+      "required": ["math_interest"],
+      "properties": {
+        "math_interest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Pre-contextual question rating for math interest (1-5 scale)"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when pre-survey was completed"
+        }
+      },
+      "description": "Pre-contextual survey collected before the first practice question"
+    },
+    "practice_section": {
+      "type": "object",
+      "required": ["questions"],
+      "properties": {
+        "questions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/definitions/QuestionResponse"
+          },
+          "description": "Array of 2 practice questions with responses"
+        }
+      },
+      "description": "Practice section with 2 questions - Q1 and Q2 are different question types"
+    },
+    "test_section": {
+      "type": "object",
+      "required": ["questions"],
+      "properties": {
+        "questions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/definitions/QuestionResponse"
+          },
+          "description": "Array of 2 test questions - Test Q1 matches Practice Q1 type, Test Q2 matches Practice Q2 type"
+        }
+      },
+      "description": "Test section with 2 questions matching practice question types"
+    },
+    "post_survey": {
+      "type": "object",
+      "properties": {
+        "confusion_level": {
+          "type": "string",
+          "description": "Self-reported confusion level"
+        },
+        "difficulty_level": {
+          "type": "string",
+          "description": "Perceived difficulty of the test"
+        },
+        "correctness_perception": {
+          "type": "string",
+          "description": "Perceived correctness of own answers"
+        },
+        "learning_amount": {
+          "type": "string",
+          "description": "Self-reported learning amount"
+        },
+        "pros_and_cons": {
+          "type": "string",
+          "description": "Open-ended feedback about the experience"
+        },
+        "age": {
+          "type": "string",
+          "description": "Participant's age"
+        },
+        "gender": {
+          "type": "string",
+          "description": "Participant's gender"
+        },
+        "education_level": {
+          "type": "string",
+          "description": "Participant's education level"
+        },
+        "post_math_interest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Post-experiment math interest rating (1-5)"
+        },
+        "agent_perceptions": {
+          "type": "object",
+          "properties": {
+            "bob": { "$ref": "#/definitions/AgentPerception" },
+            "alice": { "$ref": "#/definitions/AgentPerception" },
+            "charlie": { "$ref": "#/definitions/AgentPerception" }
+          },
+          "description": "Perceptions of each agent present in the scenario"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "Post-problem survey data"
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO timestamp when data was submitted to Firebase"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "hit_id": { "type": "string" },
+        "assignment_id": { "type": "string" },
+        "category_indices": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "Indices of selected question categories"
+        },
+        "category_variations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "category_index": { "type": "integer" },
+              "practice_variation": { "type": "integer" },
+              "test_variation": { "type": "integer" }
+            }
+          },
+          "description": "Variation assignments ensuring practice and test use different variations of same category"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "QuestionResponse": {
+      "type": "object",
+      "required": [
+        "question_index",
+        "category_id",
+        "question_text",
+        "correct_answer",
+        "answer_text",
+        "is_correct",
+        "question_load_time",
+        "answer_submit_time",
+        "duration_seconds",
+        "scratchboard_content",
+        "chat_messages"
+      ],
+      "properties": {
+        "question_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "0 for Q1, 1 for Q2"
+        },
+        "category_id": {
+          "type": "string",
+          "description": "Category identifier (e.g., 'probability', 'algebra')"
+        },
+        "question_text": {
+          "type": "string",
+          "description": "The full question text shown to the participant"
+        },
+        "correct_answer": {
+          "type": "string",
+          "description": "The correct answer from the answer key"
+        },
+        "answer_text": {
+          "type": "string",
+          "description": "The participant's typed answer (must be a valid number)"
+        },
+        "is_correct": {
+          "type": "boolean",
+          "description": "Whether the answer matches the correct answer"
+        },
+        "question_load_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the question was displayed to the participant"
+        },
+        "answer_submit_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the participant submitted their answer"
+        },
+        "skip_button_click_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO timestamp when skip button was clicked, or null if not skipped"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "description": "Time spent on question in seconds"
+        },
+        "scratchboard_content": {
+          "type": "string",
+          "description": "Content of the scratchpad used during this question"
+        },
+        "chat_messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChatMessage"
+          },
+          "description": "Chat messages exchanged during this question (practice only, empty for test)"
+        }
+      }
+    },
+    "ChatMessage": {
+      "type": "object",
+      "required": ["id", "sender", "text", "timestamp"],
+      "properties": {
+        "id": { "type": "integer" },
+        "sender": { 
+          "type": "string",
+          "description": "'user' or 'ai'"
+        },
+        "agent_id": {
+          "type": ["string", "null"],
+          "description": "Agent ID if sender is 'ai' (bob, alice, charlie)"
+        },
+        "text": { "type": "string" },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AgentPerception": {
+      "type": "object",
+      "properties": {
+        "competence": { "type": "string" },
+        "warmth": { "type": "string" },
+        "helpfulness": { "type": "string" },
+        "trustworthiness": { "type": "string" }
+      }
+    }
+  }
+}

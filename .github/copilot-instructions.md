@@ -1,14 +1,14 @@
 # AI Coding Instructions for Teaching LLM Agent
 
 ## Project Overview
-This is a Next.js research application studying how different AI agent configurations affect mathematical problem-solving. Users progress through a controlled experiment flow: **terms** → **intro** → **pre-test-survey** → **pre-test** → **lesson** → **tetris-break** → **post-test** → **final-test** → **completed**, with data saved to Firebase for analysis.
+This is a Next.js research application studying how different AI agent configurations affect mathematical problem-solving. Users progress through a controlled experiment flow: **terms** → **intro** → **pretest-survey** → **pretest** → **lesson** → **break** → **posttest** → **finaltest** → **completed**, with data saved to Firebase for analysis.
 
 ## Experiment Flow Architecture
 The entire experiment is controlled by `src/context/FlowContext.tsx`, which maintains state across 9 sequential stages. The flow includes both survey collection and mathematical testing phases.
 
 Each user is deterministically assigned to one of four lesson scenarios based on their `userId` hash:
-- `group`: User + Bob (tutor) + Charlie (concept errors) + Alice (arithmetic errors)  
-- `multi`: User + Bob (tutor) + one error-prone agent (Charlie or Alice)
+- `group`: User + Charlie (concept errors) + Alice (arithmetic errors) (Peers only)
+- `multi`: User + Bob (tutor) + Charlie (concept errors) + Alice (arithmetic errors)
 - `single`: User + Bob (tutor) only
 - `solo`: User works alone (no agents)
 
@@ -31,7 +31,7 @@ All lesson pages follow identical structure but load different agent configurati
 ### Data Persistence Flow
 1. Session data collected in lesson pages with message storage via `prepareMessagesForStorage()`
 2. `FlowContext.submitAllDataToDatabase()` calls `src/lib/storage-service.ts` with retry logic
-3. Storage service posts to `/api/submit` → `/api/firebase-submit` with atomic data validation
+3. Storage service posts directly to `/api/firebase-submit` with atomic data validation
 4. Firebase saves with automatic sanitization (Dates → ISO strings, undefined → null)
 5. Emergency localStorage backups created on failures
 
@@ -44,9 +44,8 @@ All lesson pages follow identical structure but load different agent configurati
 - **Message tracking**: Components maintain both `messages` (current chat) and `allMessages` (complete history)
 
 ### API Route Structure
-- `/api/submit`: Main data submission endpoint with comprehensive error handling and validation
+- `/api/firebase-submit`: Main data submission endpoint (via Firebase Admin SDK) with automatic data sanitization
 - `/api/openai`: GPT-4o integration for agent responses (temp: 0.3, max_tokens: 1000)
-- `/api/firebase-submit`: Firebase Admin SDK integration with automatic data sanitization
 - `/api/tests`: Test question delivery and answer validation
 - `/api/submit-survey`: Survey data collection with validation
 
@@ -67,7 +66,6 @@ All lesson pages follow identical structure but load different agent configurati
 npm run dev          # Start development server on localhost:3000
 npm run build        # Production build with Next.js optimization
 npm run lint         # ESLint check for code quality
-node scripts/wipe-firebase-db.js  # Clear Firebase data (development only)
 ```
 
 ## Critical Implementation Notes
@@ -86,3 +84,6 @@ node scripts/wipe-firebase-db.js  # Clear Firebase data (development only)
 - **Emergency backups**: localStorage used as fallback when Firebase fails, with dedicated backup keys
 
 When modifying lesson flows or agent behaviors, ensure consistency across all four lesson page implementations and maintain the deterministic user assignment system.
+
+
+Always run npx tsc after changes to verify type safety.

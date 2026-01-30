@@ -5,13 +5,13 @@ import { useFlow } from "@/context/FlowContext";
 import TetrisGame from "@/components/TetrisGame";
 
 export default function BreakPage() {
-    const { completeTetrisBreak, currentStage } = useFlow();
+    const { completeGame, currentStage } = useFlow();
     const [isTransitioning, setIsTransitioning] = useState(false);
 
     // CRITICAL FIX: Only check stage in useEffect, not during render
     useEffect(() => {
         // Verify we're in the correct stage
-        if (currentStage !== "tetris-break") {
+        if (currentStage !== "game") {
             console.warn(
                 `Warning: User accessed break page in incorrect stage: ${currentStage}`
             );
@@ -23,11 +23,11 @@ export default function BreakPage() {
         if (isTransitioning) return; // Prevent double-transitions
 
         setIsTransitioning(true);
-        console.log("Tetris game complete, proceeding to post-test...");
+        console.log("Tetris game complete, proceeding to test...");
 
         // Add delay to ensure state updates complete before navigation
         setTimeout(() => {
-            completeTetrisBreak();
+            completeGame();
         }, 500);
     };
 

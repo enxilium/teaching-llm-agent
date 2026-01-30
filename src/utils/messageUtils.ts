@@ -115,30 +115,15 @@ export const prepareMessagesForStorage = (messages: Message[] | InputMessage[]):
         timestamp = new Date();
       }
       
-      // Use more descriptive sender names based on agentId
-      let senderName = msg.sender;
-      if (msg.sender === 'ai' && msg.agentId) {
-        switch (msg.agentId) {
-          case 'arithmetic':
-            senderName = 'Arithmetic Gap';
-            break;
-          case 'concept':
-            senderName = 'Concept Gap';
-            break;
-          case 'tutor':
-            senderName = 'Tutor';
-            break;
-          default:
-            senderName = msg.agentId; // Use the agentId as fallback
-        }
-      } else if (msg.sender === 'user') {
-        senderName = 'User';
-      }
+      // IMPORTANT: Keep sender as 'user' or 'ai' for schema validation
+      // The agentId field is used to differentiate between agents (bob, alice, charlie)
+      // Do NOT change sender to descriptive names - this breaks schema validation
+      const senderValue = msg.sender === 'user' ? 'user' : 'ai';
       
       // Return a clean, consistent message format
       return {
         id: typeof msg.id === 'number' ? msg.id : index,
-        sender: senderName || 'unknown',
+        sender: senderValue,
         agentId: msg.agentId || null,
         text: textContent,
         timestamp: timestamp instanceof Date ? timestamp.toISOString() : String(timestamp)
@@ -161,29 +146,13 @@ export const prepareMessagesForStorage = (messages: Message[] | InputMessage[]):
       // Also filter out system messages in the fallback path
       .filter(msg => msg && msg.sender !== 'system')
       .map((msg, index) => {
-      // Apply the same sender name transformation even in fallback path
-      let senderName = String(msg?.sender || 'unknown');
-      if (senderName === 'ai' && msg?.agentId) {
-        switch(msg.agentId) {
-          case 'arithmetic':
-            senderName = 'Arithmetic Gap';
-            break;
-          case 'concept':
-            senderName = 'Concept Gap';
-            break;
-          case 'tutor':
-            senderName = 'Tutor';
-            break;
-          default:
-            senderName = msg.agentId; // Use the agentId as fallback
-        }
-      } else if (senderName === 'user') {
-        senderName = 'User';
-      }
+      // IMPORTANT: Keep sender as 'user' or 'ai' for schema validation
+      // The agentId field is used to differentiate between agents (bob, alice, charlie)
+      const senderValue = msg?.sender === 'user' ? 'user' : 'ai';
       
       return {
         id: typeof msg?.id === 'number' ? msg.id : index,
-        sender: senderName,
+        sender: senderValue,
         agentId: msg?.agentId || null,
         text: String(msg?.text || ''),
         timestamp: (() => {

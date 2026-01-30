@@ -11,6 +11,12 @@ export default function CompletedPage() {
     // Add a useEffect to handle redirection to Prolific after submission
     useEffect(() => {
         if (hasSubmitted) {
+            // Only redirect to Prolific in production mode
+            if (process.env.NODE_ENV === "development") {
+                console.log("🔧 DEV MODE: Prolific redirect disabled");
+                return;
+            }
+            
             // Set a timeout to redirect to Prolific completion URL after 5 seconds
             const redirectTimer = setTimeout(() => {
                 window.location.href =

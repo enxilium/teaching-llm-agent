@@ -1,73 +1,68 @@
 import { NextResponse } from "next/server";
-import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import * as admin from "firebase-admin";
+import { FirebaseSubmission } from "@/utils/types";
+import { validateFirebaseSubmission } from "@/lib/storage-service";
 
-// Proper Firebase Admin SDK initialization that handles multiple calls safely
-let app;
-const FIREBASE_APP_NAME = "math-data-app";
+// Initialize Firebase Admin SDK using service account JSON
+const serviceAccount = JSON.parse(
+    process.env.FIREBASE_SERVICE_ACCOUNT_KEY as string
+);
 
-try {
-    // Check if any Firebase apps are already initialized
-    if (getApps().length === 0) {
-        app = initializeApp(
-            {
-                credential: cert({
-                    projectId: process.env.FIREBASE_PROJECT_ID,
-                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(
-                        /\\n/g,
-                        "\n"
-                    ),
-                }),
-            },
-            FIREBASE_APP_NAME
-        );
-    } else {
-        // App(s) already initialized, get the named app or the default one
-        console.log(
-            "Firebase Admin app already initialized, retrieving existing app"
-        );
-        try {
-            app = getApp(FIREBASE_APP_NAME);
-        } catch {
-            // If named app doesn't exist, get the default app
-            app = getApp();
-        }
-    }
-} catch (error) {
-    console.error("Firebase Admin initialization error:", error);
-    throw error;
+if (admin.apps.length === 0) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+    });
 }
 
 // Get Firestore instance
-const db = getFirestore(app);
+const db = admin.firestore();
 const collectionName = "math_data";
 
-// Firebase-specific API endpoint
 export async function POST(request: Request) {
     try {
-        // Parse request body
-        const data = await request.json();
+        const data: FirebaseSubmission = await request.json();
 
-        // Log the received data structure (without sensitive content)
-        console.log("Firebase API received data with structure:", {
-            hasUserId: !!data.userId,
-            hasSessionData:
-                !!data.sessionData && Array.isArray(data.sessionData),
-            sessionDataCount: data.sessionData?.length || 0,
+        // Validate against schema using shared validation function
+        const validation = validateFirebaseSubmission(data);
+        if (!validation.valid) {
+            console.error("Schema validation failed:", validation.errors);
+            return NextResponse.json(
+                { 
+                    success: false, 
+                    error: "Schema validation failed", 
+                    details: validation.errors 
+                },
+                { status: 400 }
+            );
+        }
+        
+        if (validation.warnings.length > 0) {
+            console.warn("Validation warnings:", validation.warnings);
+        }
+
+        // Log the received data structure
+        console.log("Firebase API received valid data:", {
+            user_id: data.user_id,
+            condition: data.condition,
+            practice_questions: data.practice_section?.questions?.length || 0,
+            practice_q1_messages: data.practice_section?.questions?.[0]?.chat_messages?.length || 0,
+            practice_q2_messages: data.practice_section?.questions?.[1]?.chat_messages?.length || 0,
+            test_questions: data.test_section?.questions?.length || 0,
+            has_pre_survey: !!data.pre_survey?.math_interest,
         });
 
-        // Add metadata
+        // Add server timestamp
         const enrichedData = {
             ...data,
             _meta: {
-                savedAt: new Date(),
+                savedAt: admin.firestore.FieldValue.serverTimestamp(),
                 source: "firebase_api",
+                schema_version: "2.0",
             },
         };
 
         // Construct a unique document ID
-        const docId = `${data.userId || "unknown"}_${Date.now()}`;
+        const docId = `${data.user_id}_${Date.now()}`;
 
         // Save to Firestore
         const docRef = db.collection(collectionName).doc(docId);
@@ -75,7 +70,6 @@ export async function POST(request: Request) {
 
         console.log(`Firebase: Successfully saved data with ID: ${docId}`);
 
-        // Return success
         return NextResponse.json({
             success: true,
             message: "Data saved to Firebase",

@@ -22,6 +22,7 @@ interface SingleScenarioChatProps {
         answer: string;
         correctAnswer?: string;
     };
+    scratchboardContent?: string; // User's scratchboard/working area content
     agentContextMessage?: Message; // Message with full context for agents
 }
 
@@ -33,6 +34,7 @@ const SingleScenarioChat: React.FC<SingleScenarioChatProps> = ({
     setIsQuestioningEnabled,
     triggerInitialResponse = false,
     currentQuestion,
+    scratchboardContent,
     agentContextMessage,
 }) => {
     const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -343,9 +345,16 @@ CRITICAL: Verify all math before responding. If unsure about any calculation, st
                     if (currentQuestion.options) {
                         enhancedSystemPrompt += `\nOPTIONS: ${Array.isArray(currentQuestion.options) ? currentQuestion.options.join(", ") : Object.values(currentQuestion.options).join(", ")}`;
                     }
-                    if (currentQuestion.correctAnswer) {
-                        enhancedSystemPrompt += `\nCORRECT ANSWER: ${currentQuestion.correctAnswer}`;
+                    // Use answer field (what pages pass) or correctAnswer for backward compatibility
+                    const correctAnswer = currentQuestion.answer || currentQuestion.correctAnswer;
+                    if (correctAnswer) {
+                        enhancedSystemPrompt += `\nCORRECT ANSWER: ${correctAnswer}`;
                     }
+                }
+                
+                // Include user's scratchboard work if available
+                if (scratchboardContent && scratchboardContent.trim()) {
+                    enhancedSystemPrompt += `\n\nUSER'S SCRATCHBOARD WORK:\n"""\n${scratchboardContent.trim()}\n"""\nUse this to understand their reasoning process and identify any errors in their approach.`;
                 }
 
                 const response = await aiService.generateResponse(
@@ -459,9 +468,17 @@ REQUIREMENTS:
 
 CRITICAL: Double-check any math before responding. If uncertain, just state the correct answer.`;
 
-                // Add current question context if available
-                if (currentQuestion && currentQuestion.correctAnswer) {
-                    enhancedSystemPrompt += `\n\nORIGINAL PROBLEM CORRECT ANSWER: ${currentQuestion.correctAnswer}`;
+                // Add current question context if available (use answer field, with correctAnswer fallback)
+                if (currentQuestion) {
+                    const correctAnswer = currentQuestion.answer || currentQuestion.correctAnswer;
+                    if (correctAnswer) {
+                        enhancedSystemPrompt += `\n\nORIGINAL PROBLEM: "${currentQuestion.question}"\nCORRECT ANSWER: ${correctAnswer}`;
+                    }
+                }
+                
+                // Include user's scratchboard work if available
+                if (scratchboardContent && scratchboardContent.trim()) {
+                    enhancedSystemPrompt += `\n\nUSER'S SCRATCHBOARD WORK:\n"""\n${scratchboardContent.trim()}\n"""\nUse this to understand their reasoning process.`;
                 }
 
                 if (isUnmountedRef.current) return null;

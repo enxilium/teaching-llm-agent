@@ -1,16 +1,74 @@
 {
-    "questions": [
+  "categories": [
+    {
+      "id": "probability",
+      "name": "Statistics/Probability",
+      "variations": [
         {
-            "question": "If $2 = p^3$, then $8p$ must equal what as a power of p?",
-            "options": ["$p^4$", "$p^8$", "$p^{10}$", "$p^{12}$"],
-            "correctAnswer": "$p^{10}$",
-            "answer": "$p^{10}$"
+          "question": "Let event A = \"a student eats lunch today\" and event B = \"a student eats dinner today.\" Suppose P(A)=0.50 and P(B)=0.40. Assume events A and B are independent. What is P(A∩B)?",
+          "answer": "0.20"
         },
         {
-            "question": "If $a^{3/4} = 64$, then $\\sqrt{a}$ must equal what?",
-            "options": ["$2$", "$4$", "$8$", "$16$"],
-            "correctAnswer": "$4$",
-            "answer": "$4$"
+          "question": "Let event A = \"a student studies Spanish this week\" and event B = \"a student studies German this week.\" Suppose P(A)=0.60 and P(B)=0.30. Assume events A and B are independent. What is P(A∩B)?",
+          "answer": "0.18"
         }
-    ]
+      ]
+    },
+    {
+      "id": "algebra",
+      "name": "Intermediate Algebra",
+      "variations": [
+        {
+          "question": "Solve the following equation to find the value of q:\n\n$8(q+1)-5=3(2q-4)-1$",
+          "answer": "-8"
+        },
+        {
+          "question": "Solve the following equation to find the value of q:\n\n$7(q+2)-9=2(3q-5)+4$",
+          "answer": "-11"
+        }
+      ]
+    },
+    {
+      "id": "word",
+      "name": "Word Problems",
+      "variations": [
+        {
+          "question": "A car traveled from A to B at an average speed of 30 miles per hour and returned from B to A along the same path at an average speed of 50 miles per hour. What was the average speed, in miles per hour, for the round trip?",
+          "answer": "37.5"
+        },
+        {
+          "question": "A car traveled from A to B at an average speed of 40 miles per hour and returned from B to A along the same path at an average speed of 60 miles per hour. What was the average speed, in miles per hour, for the round trip?",
+          "answer": "48"
+        }
+      ]
+    },
+    {
+      "id": "averages",
+      "name": "Averages",
+      "variations": [
+        {
+          "question": "The mean score of 8 players in a basketball game was 14.5 points. If the highest individual score is removed, the mean score of the remaining 7 players becomes 12 points. What was the highest score?",
+          "answer": "32"
+        },
+        {
+          "question": "The mean score of 10 players in a basketball game was 18.5 points. If the highest individual score is removed, the mean score of the remaining 9 players becomes 16 points. What was the highest score?",
+          "answer": "41"
+        }
+      ]
+    },
+    {
+      "id": "number_theory",
+      "name": "Number Theory",
+      "variations": [
+        {
+          "question": "The sum of two different numbers $x$ and $y$ is 70, and the difference when the smaller number is subtracted from the larger number is 30. What is the value of $xy$?",
+          "answer": "1000"
+        },
+        {
+          "question": "The sum of two different numbers $x$ and $y$ is 80, and the difference when the smaller number is subtracted from the larger number is 20. What is the value of $xy$?",
+          "answer": "1500"
+        }
+      ]
+    }
+  ]
 }
