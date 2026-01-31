@@ -74,6 +74,7 @@ export interface PostSurveyData {
     gender?: string;
     education_level?: string;
     post_math_interest?: number;      // 1-5 scale
+    passed_attention_check?: boolean; // True if user answered "4" to question count
     agent_perceptions?: {
         bob?: AgentPerception;
         alice?: AgentPerception;

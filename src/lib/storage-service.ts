@@ -273,6 +273,11 @@ export function validateFirebaseSubmission(data: FirebaseSubmission): Validation
                 errors.push("post_survey.post_math_interest must be a number between 1 and 5");
             }
         }
+        if (data.post_survey.passed_attention_check !== undefined) {
+            if (typeof data.post_survey.passed_attention_check !== "boolean") {
+                errors.push("post_survey.passed_attention_check must be a boolean");
+            }
+        }
     }
     
     return {
@@ -370,6 +375,7 @@ function transformToFirebaseSchema(data: ExperimentData): FirebaseSubmission {
                 // If neither works, leave undefined (field is optional)
             }
         }
+        
         postSurvey.completed_at = data.surveyData.submittedAt;
         
         // Transform agent perceptions from legacy format (bobPerception, etc.)
@@ -386,6 +392,13 @@ function transformToFirebaseSchema(data: ExperimentData): FirebaseSubmission {
             if (legacySurvey.charliePerception) {
                 postSurvey.agent_perceptions.charlie = legacySurvey.charliePerception as AgentPerception;
             }
+        }
+        
+        // Convert attention check answer to boolean (correct answer is 4)
+        const attentionAnswer = legacySurvey.attentionCheckAnswer as string | undefined;
+        if (attentionAnswer !== undefined && attentionAnswer !== "") {
+            const parsedAnswer = parseInt(attentionAnswer, 10);
+            postSurvey.passed_attention_check = !isNaN(parsedAnswer) && parsedAnswer === 4;
         }
     }
     

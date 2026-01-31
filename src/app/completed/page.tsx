@@ -42,6 +42,7 @@ export default function CompletedPage() {
         gender: "",
         educationLevel: "",
         postTestMathInterest: "", // Post-experiment math interest
+        attentionCheckAnswer: "", // Attention check: how many questions were asked
     });
 
     // Add agent perception state
@@ -179,6 +180,7 @@ export default function CompletedPage() {
                 gender: finalGender,
                 educationLevel: finalEducation,
                 postTestMathInterest: surveyAnswers.postTestMathInterest, // Post-experiment math interest
+                attentionCheckAnswer: surveyAnswers.attentionCheckAnswer, // Raw answer for attention check
                 ...agentPerceptionData, // Include agent perception data
                 submittedAt: new Date().toISOString(),
             };
@@ -417,6 +419,23 @@ export default function CompletedPage() {
                                     <option value="somewhat-uninterested">Somewhat uninterested</option>
                                     <option value="very-uninterested">Very uninterested</option>
                                 </select>
+                            </div>
+
+                            <div>
+                                <label className="block mb-2">
+                                    How many math questions did you answer in total during this study? (Enter a number)
+                                </label>
+                                <input
+                                    type="number"
+                                    name="attentionCheckAnswer"
+                                    value={surveyAnswers.attentionCheckAnswer}
+                                    onChange={handleInputChange}
+                                    required
+                                    min="0"
+                                    max="20"
+                                    className="w-full p-3 bg-white bg-opacity-20 rounded border border-gray-400 text-white"
+                                    placeholder="Enter the total number of questions..."
+                                />
                             </div>
 
                             {/* Agent Perception Section - only show if agents were present */}
