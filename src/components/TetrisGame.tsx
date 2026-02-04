@@ -72,7 +72,7 @@ export default function TetrisGame({ onGameComplete }: TetrisGameProps) {
     const [gameStarted, setGameStarted] = useState(false);
     const [completionCalled, setCompletionCalled] = useState(false);
     const [timeRemaining, setTimeRemaining] = useState(
-        process.env.NODE_ENV === "development" ? 10 : 120
+        process.env.NODE_ENV === "development" ? 10 : 60
     );
 
     // Generate a random piece

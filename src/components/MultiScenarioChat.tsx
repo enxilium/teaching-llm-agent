@@ -226,7 +226,6 @@ Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confide
     const generateBobResponse = useCallback(async (
         context: string,
         isInitialFeedback: boolean = false,
-        nextParticipant?: 'User' | 'Alice' | 'Charlie'
     ): Promise<Message | null> => {
         if (isUnmountedRef.current || !bobAgent) return null;
 
@@ -243,7 +242,8 @@ Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confide
         addTypingMessageId(placeholderId);
 
         try {
-            const targetParticipant = nextParticipant || getRandomParticipant();
+            // Bob ALWAYS addresses the User in this new flow
+            const targetParticipant = 'User';
             
             const prompt = `${bobAgent.systemPrompt}
 
@@ -258,7 +258,7 @@ As Bob the teacher, ${isInitialFeedback
     : `acknowledge what was just said, provide brief feedback, then ask @${targetParticipant} a follow-up question to continue the discussion.`
 }
 
-IMPORTANT: You MUST include exactly one @mention at the end (@User, @Alice, or @Charlie) to direct who should respond next.
+IMPORTANT: You MUST include exactly one @mention at the end (@User) to direct who should respond next. Do NOT ask Alice or Charlie.
 Remember: Use single $ for math like $x^2$. No markdown formatting (no **bold** or *italics*).`;
 
             const response = await aiService.generateResponse([
@@ -293,57 +293,15 @@ Remember: Use single $ for math like $x^2$. No markdown formatting (no **bold** 
             setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
             return null;
         }
-    }, [bobAgent, currentQuestion, scratchboardContent, getUniqueMessageId, addTypingMessageId, removeTypingMessageId, onNewMessage, getRandomParticipant, parseMention]);
+    }, [bobAgent, currentQuestion, scratchboardContent, getUniqueMessageId, addTypingMessageId, removeTypingMessageId, onNewMessage, parseMention]);
 
     // Handle Bob's mention - trigger the appropriate responder
     const handleBobMention = useCallback(async (bobMessage: Message) => {
-        const mention = parseMention(bobMessage.text);
-        console.log(`🎓 Bob mentioned: ${mention || 'nobody'}`);
-
-        if (mention === 'User') {
-            // User should respond
-            console.log("👤 User was asked - enabling input");
-            setIsQuestioningEnabled(true);
-            agentResponseInProgressRef.current = false;
-        } else if (mention === 'Alice') {
-            // Alice should respond, then Bob continues
-            console.log("🍎 Alice was asked - triggering Alice response");
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            const aliceMsg = await generateAliceResponse(`Bob asked you: "${bobMessage.text}"`);
-            
-            if (aliceMsg && !isUnmountedRef.current) {
-                // Bob follows up after Alice
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                const nextBobMsg = await generateBobResponse(
-                    `Alice just said: "${aliceMsg.text}"`,
-                    false,
-                    getRandomParticipant()
-                );
-                if (nextBobMsg) await handleBobMention(nextBobMsg);
-            }
-        } else if (mention === 'Charlie') {
-            // Charlie should respond, then Bob continues
-            console.log("🔵 Charlie was asked - triggering Charlie response");
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            const charlieMsg = await generateCharlieResponse(`Bob asked you: "${bobMessage.text}"`);
-            
-            if (charlieMsg && !isUnmountedRef.current) {
-                // Bob follows up after Charlie
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                const nextBobMsg = await generateBobResponse(
-                    `Charlie just said: "${charlieMsg.text}"`,
-                    false,
-                    getRandomParticipant()
-                );
-                if (nextBobMsg) await handleBobMention(nextBobMsg);
-            }
-        } else {
-            // No valid mention - default to user
-            console.log("💬 No specific mention - enabling user input");
-            setIsQuestioningEnabled(true);
-            agentResponseInProgressRef.current = false;
-        }
-    }, [parseMention, setIsQuestioningEnabled, generateAliceResponse, generateCharlieResponse, generateBobResponse, getRandomParticipant]);
+        // Bob should primarily accept User interaction now
+        console.log(`🎓 Bob spoke. Enabling User input.`);
+        setIsQuestioningEnabled(true);
+        agentResponseInProgressRef.current = false;
+    }, [setIsQuestioningEnabled]);
 
     // Initial response sequence: User → Alice → Charlie → Bob
     const triggerInitialSequence = useCallback(async () => {
@@ -383,20 +341,20 @@ Remember: Use single $ for math like $x^2$. No markdown formatting (no **bold** 
             console.log("🎓 Generating Bob's initial feedback...");
             const bobMsg = await generateBobResponse(
                 `User's answer: "${userAnswer}"\nAlice's answer: "${aliceMsg.text}"\nCharlie's answer: "${charlieMsg.text}"`,
-                true,
-                getRandomParticipant()
+                true
             );
             if (!bobMsg || isUnmountedRef.current) return;
 
-            // Handle who Bob mentioned
-            await handleBobMention(bobMsg);
+            // Enable user input - Bob will have tagged User
+            setIsQuestioningEnabled(true);
+            agentResponseInProgressRef.current = false;
 
         } catch (error) {
             console.error("Error in initial sequence:", error);
             agentResponseInProgressRef.current = false;
             setIsQuestioningEnabled(true);
         }
-    }, [bobAgent, aliceAgent, charlieAgent, initialMessages, setIsQuestioningEnabled, generateAliceResponse, generateCharlieResponse, generateBobResponse, getRandomParticipant, handleBobMention]);
+    }, [bobAgent, aliceAgent, charlieAgent, initialMessages, setIsQuestioningEnabled, generateAliceResponse, generateCharlieResponse, generateBobResponse]);
 
     // Trigger initial response
     useEffect(() => {
@@ -438,16 +396,23 @@ Remember: Use single $ for math like $x^2$. No markdown formatting (no **bold** 
             console.log("🎓 User spoke - Bob responding...");
             const bobMsg = await generateBobResponse(
                 `The user just said: "${userMessage.text}"`,
-                false,
-                getRandomParticipant()
+                false
             );
-            if (bobMsg) await handleBobMention(bobMsg);
+            
+            // Re-enable input after Bob responds
+            if (bobMsg) {
+                setIsQuestioningEnabled(true);
+                agentResponseInProgressRef.current = false;
+            } else {
+                 setIsQuestioningEnabled(true);
+                agentResponseInProgressRef.current = false;
+            }
         } catch (error) {
             console.error("Error handling user message:", error);
             agentResponseInProgressRef.current = false;
             setIsQuestioningEnabled(true);
         }
-    }, [input, getUniqueMessageId, onNewMessage, setIsQuestioningEnabled, generateBobResponse, getRandomParticipant, handleBobMention]);
+    }, [input, getUniqueMessageId, onNewMessage, setIsQuestioningEnabled, generateBobResponse]);
 
     // Get display info for a message
     const getAgentDisplayInfo = (msg: Message) => {

@@ -72,16 +72,15 @@ export default function IntroPage() {
     // Get scenario description
     const getScenarioDescription = () => {
         switch (lessonType) {
-            case 'solo':
-                return "After solving the practice problems, you will receive brief feedback on your answers.";
             case 'single':
-                return "After solving the practice problems, you will receive feedback from an AI tutor. You may also ask the tutor questions to help you prepare for the test.";
+                return "tutor who will give you personalized feedback.";
             case 'group':
-                return "After solving the practice problems, you will see how your AI 'peers' (other AI agents) solved them. You may discuss the problem in a group setting before the test.";
+                return "peers to discuss the problem.";
             case 'multi':
-                return "After solving the practice problems, you will receive feedback from an AI tutor alongside AI 'peers' (other AI agents). You may discuss the problem with both the tutor and your peers before the test.";
+                return "tutor and peers to discuss the problem.";
+            case 'solo':
             default:
-                return "After solving the practice problems, you will receive feedback to help you prepare for the test.";
+                return "";
         }
     };
     
@@ -106,34 +105,16 @@ export default function IntroPage() {
             <div className="max-w-3xl mx-auto text-white">
                 <h1 className="text-3xl font-bold text-white text-center mb-6">Introduction to Your Learning Experience</h1>
                 
-                {/* Scenario Assignment Display */}
-                <div className="bg-blue-900 bg-opacity-50 p-4 rounded-lg border border-blue-400 mb-6">
-                    <div className="flex items-center justify-between">
-                        <span className="text-lg">Your assigned learning scenario:</span>
-                        <span className="text-xl font-bold text-blue-300">{getScenarioName()}</span>
-                    </div>
-                </div>
-                
                 <div className="bg-purple-900 bg-opacity-50 p-6 rounded-lg border border-purple-500 mb-8">
-                    <h2 className="text-2xl font-bold mb-4">Study Overview</h2>
+                    <h2 className="text-2xl font-bold mb-4">Introduction</h2>
                     <p className="mb-4">
-                        In this study, you will solve math problems involving exponents, roots, and algebraic operations. The problems are similar to those found on standardized tests.
+                        In this task, you will be asked to solve two math problems in a Practice/Lesson round, followed by two more problems in a Test round. The problems are similar to those commonly found on standardized tests.
                     </p>
-                    <p className="mb-4">
-                        The study consists of:
-                    </p>
-                    <ol className="list-decimal pl-6 mb-4 space-y-2">
-                        <li><strong>Pre-Survey:</strong> A quick question about your math background.</li>
-                        <li><strong>Practice Section:</strong> 2 math problems where you&apos;ll work through and submit your answers. {hasChat ? "After submitting each answer, you can discuss it with your learning partner(s)." : ""}</li>
-                        <li><strong>Break:</strong> A short tetris break to refresh your mind.</li>
-                        <li><strong>Test Section:</strong> 2 similar problems to measure what you&apos;ve learned (no chat available).</li>
-                        <li><strong>Post-Survey:</strong> Share your experience and feedback.</li>
-                    </ol>
                     
                     {hasChat && (
-                        <div className="mt-4 p-3 bg-purple-800 bg-opacity-50 rounded border border-purple-400">
-                            <p className="text-sm"><strong>About the chat:</strong> {getScenarioDescription()}</p>
-                        </div>
+                        <p className="mb-4">
+                            After providing a response to each problem in the Lesson, you will interact with AI {getScenarioDescription()}
+                        </p>
                     )}
                 </div>
 
@@ -175,8 +156,7 @@ export default function IntroPage() {
                         <h2 className="text-2xl font-bold mb-4">Independent Study Mode</h2>
                         <p>
                             In this session, you will work through the practice problems independently. 
-                            After submitting your answers, you will receive brief feedback before moving 
-                            on to the next problem. Focus on your own problem-solving approach and take 
+                            Focus on your own problem-solving approach and take 
                             notes in the scratchpad as needed.
                         </p>
                     </div>

@@ -288,14 +288,15 @@ Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confide
         console.log(`🎲 First responder: ${firstIsAlice ? 'Alice' : 'Charlie'}`);
 
         try {
-            // First agent responds
+            // First agent responds - gives ANSWER to problem
             const firstContext = `The user said: "${userAnswer}"`;
             let firstMsg: Message | null;
             
+            // Both agents give their initial "answer" (isFirstResponse=true)
             if (firstIsAlice) {
-                firstMsg = await generateAliceResponse(firstContext, true);
+                firstMsg = await generateAliceResponse(firstContext, true, false);
             } else {
-                firstMsg = await generateCharlieResponse(firstContext, true);
+                firstMsg = await generateCharlieResponse(firstContext, true, false);
             }
 
             if (!firstMsg || isUnmountedRef.current) return;
@@ -304,27 +305,30 @@ Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confide
             await new Promise(resolve => setTimeout(resolve, 2000));
             if (isUnmountedRef.current) return;
 
-            // Second agent responds, addressing the first and the user
+            // Second agent responds - gives ANSWER to problem and TAGS USER
             const secondContext = `The user said: "${userAnswer}"\n${firstIsAlice ? 'Alice' : 'Charlie'} responded: "${firstMsg.text}"`;
             let secondMsg: Message | null;
 
             if (firstIsAlice) {
-                secondMsg = await generateCharlieResponse(secondContext, false);
+                // If Alice went first, Charlie goes second
+                secondMsg = await generateCharlieResponse(secondContext, true, true); // true, true => First Answer + MUST mention user
             } else {
-                secondMsg = await generateAliceResponse(secondContext, false);
+                // If Charlie went first, Alice goes second
+                secondMsg = await generateAliceResponse(secondContext, true, true);
             }
 
             if (!secondMsg || isUnmountedRef.current) return;
 
-            // Handle the mention chain from the second agent's response
-            await handleAgentMention(secondMsg, true);
+            // Enable user input immediately after second agent
+            setIsQuestioningEnabled(true);
+            agentResponseInProgressRef.current = false;
 
         } catch (error) {
             console.error("Error in initial sequence:", error);
             agentResponseInProgressRef.current = false;
             setIsQuestioningEnabled(true);
         }
-    }, [aliceAgent, charlieAgent, initialMessages, setIsQuestioningEnabled, generateAliceResponse, generateCharlieResponse, handleAgentMention]);
+    }, [aliceAgent, charlieAgent, initialMessages, setIsQuestioningEnabled, generateAliceResponse, generateCharlieResponse]);
 
     // Trigger initial response
     useEffect(() => {
@@ -365,45 +369,55 @@ Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confide
         await new Promise(resolve => setTimeout(resolve, 1500));
 
         try {
+            // New logic: Simple User -> Agent loop.
+            // If user mentioned someone, that person responds. Otherwise random.
+            // Replying agent ALWAYS tags user back.
+            
+            let respondingAgentId = "";
+            let responseMsg: Message | null = null;
+            
             if (mention === 'Alice') {
-                console.log("👤 User mentioned Alice specifically");
-                const aliceMsg = await generateAliceResponse(
-                    `The user said to you: "${userMessage.text}"`,
-                    false
-                );
-                if (aliceMsg) await handleAgentMention(aliceMsg);
+                respondingAgentId = "Alice";
             } else if (mention === 'Charlie') {
-                console.log("👤 User mentioned Charlie specifically");
-                const charlieMsg = await generateCharlieResponse(
-                    `The user said to you: "${userMessage.text}"`,
-                    false
-                );
-                if (charlieMsg) await handleAgentMention(charlieMsg);
+                respondingAgentId = "Charlie";
             } else {
-                // No specific mention - random agent responds
-                const respondIsAlice = Math.random() < 0.5;
-                console.log(`💬 No specific mention - ${respondIsAlice ? 'Alice' : 'Charlie'} responds`);
-                
-                if (respondIsAlice) {
-                    const aliceMsg = await generateAliceResponse(
-                        `The user said: "${userMessage.text}"`,
-                        false
-                    );
-                    if (aliceMsg) await handleAgentMention(aliceMsg);
-                } else {
-                    const charlieMsg = await generateCharlieResponse(
-                        `The user said: "${userMessage.text}"`,
-                        false
-                    );
-                    if (charlieMsg) await handleAgentMention(charlieMsg);
-                }
+                // Randomly select one of the agents to respond if no specific mention
+                respondingAgentId = Math.random() < 0.5 ? "Alice" : "Charlie";
             }
+            
+            console.log(`💬 User -> ${respondingAgentId} (Selected randomly or by mention)`);
+            
+            // Generate response from the selected agent
+            if (respondingAgentId === "Alice") {
+                responseMsg = await generateAliceResponse(
+                    `The user said to you: "${userMessage.text}"`,
+                    false, // Not first response
+                    true   // MUST mention user to keep loop going
+                );
+            } else {
+                responseMsg = await generateCharlieResponse(
+                    `The user said to you: "${userMessage.text}"`,
+                    false, // Not first response
+                    true   // MUST mention user to keep loop going
+                );
+            }
+            
+            // Enable input again after response
+            if (responseMsg) {
+                setIsQuestioningEnabled(true);
+                agentResponseInProgressRef.current = false;
+            } else {
+                // Fallback in case of error
+                setIsQuestioningEnabled(true);
+                agentResponseInProgressRef.current = false;
+            }
+            
         } catch (error) {
             console.error("Error handling user message:", error);
             agentResponseInProgressRef.current = false;
             setIsQuestioningEnabled(true);
         }
-    }, [input, getUniqueMessageId, onNewMessage, setIsQuestioningEnabled, parseMention, generateAliceResponse, generateCharlieResponse, handleAgentMention]);
+    }, [input, getUniqueMessageId, onNewMessage, setIsQuestioningEnabled, parseMention, generateAliceResponse, generateCharlieResponse]);
 
     // Get display info for a message
     const getAgentDisplayInfo = (msg: Message) => {

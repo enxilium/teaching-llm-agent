@@ -80,14 +80,14 @@ export default function Terms() {
                     <p className="mb-4">
                         Researchers at the University of Toronto are studying
                         how different types of feedback affect people&apos;s
-                        ability to solve multiple choice mathematical problems.
+                        ability to solve mathematical problems.
                         Researchers will vary the types of information offered
                         to different participants in a Lesson round, and then
                         study how they answer similar questions in a final Test round.
                     </p>
 
                     <p className="mb-4">
-                        In this task, you will solve multiple-choice math
+                        In this task, you will solve math
                         problems about exponents. After some practice questions,
                         you will receive feedback in a &quot;Lesson&quot; round, then move
                         on to more similar questions in a final &quot;Test&quot; round. The

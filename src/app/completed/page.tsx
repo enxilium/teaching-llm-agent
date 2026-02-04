@@ -403,7 +403,7 @@ export default function CompletedPage() {
 
                             <div>
                                 <label className="block mb-2">
-                                    After completing this experiment, how interested are you in mathematics?
+                                    How interested are you in mathematics?
                                 </label>
                                 <select
                                     name="postTestMathInterest"
