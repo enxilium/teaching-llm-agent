@@ -87,15 +87,6 @@ export default function Terms() {
                     </p>
 
                     <p className="mb-4">
-                        In this task, you will solve math
-                        problems about exponents. After some practice questions,
-                        you will receive feedback in a &quot;Lesson&quot; round, then move
-                        on to more similar questions in a final &quot;Test&quot; round. The
-                        problems are similar to those commonly found on
-                        standardized tests.
-                    </p>
-
-                    <p className="mb-4">
                         By clicking the survey, you agree that:
                         <br />
                         • You have read and understood the information on this
