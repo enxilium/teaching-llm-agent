@@ -325,7 +325,7 @@ export default function CompletedPage() {
                             <div>
                                 <label className="block mb-2">
                                     How difficult did you find the test
-                                    question?
+                                    questions?
                                 </label>
                                 <select
                                     name="difficultyLevel"
@@ -350,7 +350,7 @@ export default function CompletedPage() {
 
                             <div>
                                 <label className="block mb-2">
-                                    Do you think you got the test question
+                                    Do you think you got any of the test questions
                                     right?
                                 </label>
                                 <select
@@ -368,8 +368,7 @@ export default function CompletedPage() {
 
                             <div>
                                 <label className="block mb-2">
-                                    How much did you learn from the lesson
-                                    (after practice problems)?
+                                    How much did you learn from the lesson?
                                 </label>
                                 <select
                                     name="learningAmount"

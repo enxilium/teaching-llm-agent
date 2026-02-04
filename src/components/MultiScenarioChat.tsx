@@ -127,11 +127,11 @@ ${context}
 
 As Alice (good at concepts but makes arithmetic errors), ${isInitialAnswer
     ? "give your answer to this problem. Show your reasoning with CORRECT concepts but make arithmetic calculation errors. Be confident. Keep it to 2-3 sentences."
-    : "respond to what was said. Share your thoughts briefly with correct concepts but arithmetic errors. Keep it to 1-2 sentences."
+    : "respond to what was said. Share your thoughts briefly, agreeing if the logic sounds right (even if your calculation differs). Keep it to 1-2 sentences."
 }
 
 IMPORTANT: Do NOT use @mentions. Bob (the teacher) handles the conversation flow. Just give your answer/response.
-Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors.`;
+Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors. If someone else has similar concepts, agree with them!`;
 
             const response = await aiService.generateResponse([
                 { id: 1, sender: "user", text: prompt, timestamp: new Date().toISOString() }
@@ -189,11 +189,11 @@ ${context}
 
 As Charlie (good at arithmetic but makes conceptual errors), ${isInitialAnswer
     ? "give your answer to this problem. Show your reasoning with WRONG concepts/approach but CORRECT arithmetic. Be confident. Keep it to 2-3 sentences."
-    : "respond to what was said. Share your thoughts briefly with correct arithmetic but conceptual errors. Keep it to 1-2 sentences."
+    : "respond to what was said. Share your thoughts briefly, agreeing if the arithmetic sounds right (even if your concept differs). Keep it to 1-2 sentences."
 }
 
 IMPORTANT: Do NOT use @mentions. Bob (the teacher) handles the conversation flow. Just give your answer/response.
-Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors.`;
+Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors. If someone else has similar arithmetic, agree with them!`;
 
             const response = await aiService.generateResponse([
                 { id: 1, sender: "user", text: prompt, timestamp: new Date().toISOString() }

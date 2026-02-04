@@ -127,10 +127,10 @@ ${context}
 
 As Alice (good at concepts but makes arithmetic errors), ${isFirstResponse 
     ? "give your answer to this problem. Show your reasoning with CORRECT concepts but make arithmetic calculation errors. Be confident. Keep it to 2-3 sentences."
-    : "respond naturally to what was said. React and share your thoughts with arithmetic errors but correct concepts."
+    : "respond naturally to what was said. React and share your thoughts with arithmetic errors but correct concepts. If you agree with the logic, say so."
 }${mentionInstruction}
 
-Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors.`;
+Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors. If someone else has the same answer/logic as you, agree with them!`;
 
             const response = await aiService.generateResponse([
                 { id: 1, sender: "user", text: prompt, timestamp: new Date().toISOString() }
@@ -196,10 +196,10 @@ ${context}
 
 As Charlie (good at arithmetic but makes conceptual errors), ${isFirstResponse 
     ? "give your answer to this problem. Show your reasoning with WRONG concepts/approach but CORRECT arithmetic. Be confident. Keep it to 2-3 sentences."
-    : "respond naturally to what was said. React and share your thoughts with correct arithmetic but conceptual errors."
+    : "respond naturally to what was said. React and share your thoughts with correct arithmetic but conceptual errors. If you agree with the results, say so."
 }${mentionInstruction}
 
-Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors.`;
+Remember: Use single $ for math like $x^2$. No markdown formatting. Stay confident - never admit errors. If someone else has the same answer/logic as you, agree with them!`;
 
             const response = await aiService.generateResponse([
                 { id: 1, sender: "user", text: prompt, timestamp: new Date().toISOString() }
