@@ -156,10 +156,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
             if (assignmentIdParam) assignmentId = assignmentIdParam;
         }
 
-        // Randomly assign scenario (assuming users won't refresh)
+        // TEMPORARY: Hardcoded to "single" to balance condition counts
         const lessonTypes: LessonType[] = ["group", "multi", "single", "solo"];
-        const lessonTypeIndex = Math.floor(Math.random() * lessonTypes.length);
-        const selectedLessonType = lessonTypes[lessonTypeIndex];
+        const selectedLessonType: LessonType = "single";
 
         // Generate seed for category selection based on userId
         let scenarioSeed = 5381;
